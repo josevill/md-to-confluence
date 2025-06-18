@@ -1,0 +1,25 @@
+[project]
+name = "md-to-confluence"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "atlassian-python-api>=4.0.4",
+    "textual>=3.4.0",
+    "textual-dev>=1.7.0",
+    "watchdog>=6.0.0",
+    "markdown>=3.5.2",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2.0",
+    "pytest>=8.4.0",
+    "pytest-cov>=6.2.1",
+]
+
+[tool.isort]
+profile          = "black"
+line_length      = 100
+py_version       = 310
