@@ -184,7 +184,7 @@ class MarkdownConverter:
             "<br>", "<br />"
         )  # Use self-closing tags
 
-        logger.info(f"Converted content: {html_content}")
+        # logger.info(f"Converted content: {html_content}")
         logger.debug("Markdown conversion completed")
         return html_content
 
