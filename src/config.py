@@ -2,6 +2,8 @@
 
 import logging
 import logging.handlers
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -54,3 +56,22 @@ def setup_logging(level: int = logging.INFO) -> None:
     logging.info("=" * 80)
     logging.info(f"New session started at {session_start}")
     logging.info("=" * 80)
+
+
+def get_confluence_pat_1password(op_item="ConfluencePAT") -> str:
+    """Get the Confluence PAT from 1password."""
+
+    OP_BINARY_NAME = "op"
+    if not shutil.which(OP_BINARY_NAME):
+        raise FileNotFoundError(
+            "1Password CLI not found. Install it from https://1password.com/downloads/"
+        )
+    try:
+        result = subprocess.run(
+            [OP_BINARY_NAME, "item", "get", op_item, "--fields", "label=notesPlain"],
+            check=True,
+            capture_output=True,
+        )
+        return result.stdout.decode("utf-8").strip()
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Failed to read 1Password item {op_item}") from e
