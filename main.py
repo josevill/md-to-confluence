@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 
-from src.config import setup_logging
+from src.config import get_confluence_pat_1password, setup_logging
 from src.confluence.client import ConfluenceClient
 from src.confluence.converter import MarkdownConverter
 from src.monitor.file_watcher import FileMonitor
@@ -29,19 +29,17 @@ def main() -> None:
     try:
         logger.info("Starting md-to-confluence...")
 
-        # Load configuration
         config = load_config(Path("config.json"))
+        pat_token = get_confluence_pat_1password()
 
-        # Initialize components
         confluence_client = ConfluenceClient.get_instance(
             base_url=config["confluence_url"],
-            token=config["confluence_pat"],
+            token=pat_token,
             space_key=config["space_key"],
         )
 
         markdown_converter = MarkdownConverter()
 
-        # Initialize sync engine (singleton)
         sync_engine = SyncEngine.get_instance(
             docs_dir=Path(config["docs_dir"]),
             state_file=Path(config["state_file"]),
@@ -50,7 +48,6 @@ def main() -> None:
             debounce_interval=1.0,
         )
 
-        # Initialize and start file monitor
         file_monitor = FileMonitor(
             docs_dir=Path(config["docs_dir"]),
             sync_engine=sync_engine,
@@ -58,7 +55,6 @@ def main() -> None:
         )
         file_monitor.start()
 
-        # Start the UI application
         app = MDToConfluenceApp(sync_engine)
         app.run()
 
