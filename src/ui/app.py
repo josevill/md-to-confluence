@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
 from src.sync.engine import SyncEngine
 
@@ -18,15 +18,14 @@ from src.sync.engine import SyncEngine
 CONFIG_PATH = Path("config.json")
 
 
-class LogWidget(Static):
-    """Widget to display real-time logs."""
+class LogWidget(RichLog):
+    """Widget to display real-time logs with scrolling support."""
 
-    def __init__(self: "LogWidget", max_lines: int = 100, **kwargs: Any) -> None:
+    def __init__(self: "LogWidget", max_lines: int = 1000, **kwargs: Any) -> None:
         """Initialize the LogWidget."""
-        super().__init__(**kwargs)
-        self.max_lines = max_lines
-        self.lines = []
+        super().__init__(max_lines=max_lines, **kwargs)
         self.session_start_time = None
+        self.last_file_size = 0
         self._find_session_start()
 
     def _find_session_start(self: "LogWidget") -> None:
@@ -69,35 +68,80 @@ class LogWidget(Static):
 
     def add_log(self: "LogWidget", message: str) -> None:
         """Add a log message to the widget."""
-        self.lines.append(message)
-        if len(self.lines) > self.max_lines:
-            self.lines = self.lines[-self.max_lines :]
-        self.update("\n".join(self.lines))
+        self.write(message)
 
     async def refresh_logs(self: "LogWidget") -> None:
-        """Read the last N lines from the log file for the current session."""
+        """Read new lines from the log file for the current session."""
+        log_file = Path("logs/md_to_confluence.log")
+        if not log_file.exists():
+            return
+
+        try:
+            current_size = log_file.stat().st_size
+            if current_size == self.last_file_size:
+                return  # No new content
+
+            with log_file.open("r", encoding="utf-8") as f:
+                # If file is smaller than last size, it was truncated - reload all
+                if current_size < self.last_file_size:
+                    self.clear()
+                    lines = f.readlines()
+                else:
+                    # Seek to where we left off
+                    f.seek(self.last_file_size)
+                    lines = f.readlines()
+
+                # Filter and add current session lines
+                for line in lines:
+                    if self._is_current_session(line.rstrip()):
+                        self.write(line.rstrip())
+
+                self.last_file_size = current_size
+
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error refreshing logs: {e}")
+
+    async def on_mount(self: "LogWidget") -> None:
+        """Load initial logs when the widget mounts."""
         log_file = Path("logs/md_to_confluence.log")
         if log_file.exists():
             try:
                 with log_file.open("r", encoding="utf-8") as f:
-                    # Read all lines but only keep current session
-                    all_lines = [
-                        line.rstrip() for line in f.readlines() if self._is_current_session(line)
-                    ]
-                    # Keep only the last max_lines
-                    self.lines = all_lines[-self.max_lines :]
-                    self.update("\n".join(self.lines))
+                    lines = f.readlines()
+                    # Load current session lines
+                    for line in lines:
+                        if self._is_current_session(line.rstrip()):
+                            self.write(line.rstrip())
+
+                    self.last_file_size = log_file.stat().st_size
             except Exception as e:
                 logger = logging.getLogger(__name__)
-                logger.error(f"Error refreshing logs: {e}")
+                logger.error(f"Error loading initial logs: {e}")
 
 
 class MDToConfluenceApp(App):
     """Main Textual TUI app for md-to-confluence."""
 
-    CSS_PATH = None
+    CSS = """
+    LogWidget {
+        border: solid $primary;
+        height: 1fr;
+        width: 1fr;
+        margin: 1;
+    }
+
+    DataTable {
+        border: solid $primary;
+        height: 1fr;
+        width: 1fr;
+        margin: 1;
+    }
+    """
+
     BINDINGS = [
         ("q", "quit", "Quit"),
+        ("ctrl+c", "clear_logs", "Clear Logs"),
     ]
 
     file_statuses: reactive[Dict[str, str]] = reactive({})
@@ -133,6 +177,10 @@ class MDToConfluenceApp(App):
             # Placeholder, can be improved with real status
             status = "Synced"
             self.data_table.add_row(file_path, status)
+
+    def action_clear_logs(self: "MDToConfluenceApp") -> None:
+        """Clear the log widget."""
+        self.log_widget.clear()
 
 
 def load_config(path: Path) -> Dict[str, Any]:
