@@ -20,7 +20,7 @@ class SyncEvent:
     def __init__(self, event_type: str, file_path: Path):
         """Initialize the SyncEvent."""
         self.event_type = event_type  # 'created', 'modified', 'deleted'
-        self.file_path = file_path
+        self.file_path = file_path.resolve()
         self.timestamp = time.time()
 
     def __repr__(self):
@@ -53,7 +53,7 @@ class SyncEngine:
         """Initialize the SyncEngine."""
         if SyncEngine._instance is not None:
             raise Exception("SyncEngine is a singleton. Use get_instance().")
-        self.docs_dir = docs_dir
+        self.docs_dir = docs_dir.resolve()
         self.state = SyncState(state_file)
         self.confluence = confluence_client
         self.converter = converter
@@ -98,10 +98,31 @@ class SyncEngine:
             except Exception as e:
                 logger.error(f"Error in SyncEngine worker: {e}")
 
+    def _get_relative_path(self: "SyncEngine", file_path: Path) -> Optional[Path]:
+        """Get the relative path from docs_dir to file_path.
+
+        Args:
+            file_path: The file path to get the relative path for
+
+        Returns:
+            The relative path if file_path is under docs_dir, None otherwise
+        """
+        try:
+            return file_path.relative_to(self.docs_dir)
+        except ValueError:
+            logger.error(f"File '{file_path!r}' is not under docs directory '{self.docs_dir!r}'")
+            return None
+
     def _process_event(self: "SyncEngine", event: SyncEvent) -> None:
         """Process the event."""
         logger.info(f"Processing event: {event}")
         file_path = event.file_path
+
+        # Get relative path and validate it's under docs_dir
+        rel_path = self._get_relative_path(file_path)
+        if rel_path is None:
+            return
+
         if event.event_type == "created" or event.event_type == "modified":
             if not file_path.exists():
                 logger.warning(f"File not found: {file_path}")
@@ -111,7 +132,7 @@ class SyncEngine:
             storage_format = self.converter.convert(content, base_path=file_path.parent)
             page_id = self.state.get_page_id(str(file_path))
             title = file_path.stem.replace("_", " ").replace("-", " ").title()
-            parent_id = self._get_parent_page_id(file_path)
+            parent_id = self._get_parent_page_id(rel_path)
             if page_id:
                 # Update existing page
                 self.confluence.update_page(
@@ -139,9 +160,15 @@ class SyncEngine:
             else:
                 logger.warning(f"No page mapping found for deleted file: {file_path}")
 
-    def _get_parent_page_id(self: "SyncEngine", file_path: Path) -> Optional[str]:
-        # Determine parent page ID based on directory structure
-        rel_path = file_path.relative_to(self.docs_dir)
+    def _get_parent_page_id(self: "SyncEngine", rel_path: Path) -> Optional[str]:
+        """Get the parent page ID for a file.
+
+        Args:
+            rel_path: The path relative to docs_dir
+
+        Returns:
+            The parent page ID or None for top-level files
+        """
         if rel_path.parent == Path("."):
             # Top-level file, parent is the root page (should be configured)
             # For now, return None (should be set in config)

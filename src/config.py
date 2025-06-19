@@ -2,9 +2,10 @@
 
 import logging
 import logging.handlers
+from datetime import datetime
+from pathlib import Path
 
 # import os
-from pathlib import Path
 
 # Base directories
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -25,26 +26,31 @@ def setup_logging(level: int = logging.INFO) -> None:
     Args:
         level: The logging level to use. Defaults to logging.INFO.
     """
-    # Create handlers
+    # Create file handler with append mode
     file_handler = logging.handlers.RotatingFileHandler(
         LOG_FILE,
+        mode="a",  # Append mode
         maxBytes=LOG_MAX_BYTES,
         backupCount=LOG_BACKUP_COUNT,
     )
-    console_handler = logging.StreamHandler()
 
-    # Create formatters and add it to handlers
+    # Create formatter and add it to handler
     formatter = logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT)
     file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
 
     # Get root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # Add handlers to the logger
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+    # Remove any existing handlers (to avoid duplicates)
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
 
-    # Log startup message
-    logging.info("Logging setup completed")
+    # Add file handler to the logger
+    root_logger.addHandler(file_handler)
+
+    # Add session marker to the log file
+    session_start = datetime.now().strftime(LOG_DATE_FORMAT)
+    logging.info("=" * 80)
+    logging.info(f"New session started at {session_start}")
+    logging.info("=" * 80)

@@ -10,6 +10,9 @@
   - [x] Create initial __init__.py files
 - [x] Set up development environment
   - [x] Configure pre-commit hooks
+    - [x] Configure Black formatter
+    - [x] Configure flake8 with extended line length (88)
+    - [x] Add type annotation checks
   - [x] Set up pytest configuration
   - [x] Add .gitignore rules
   - [x] Configure logging
@@ -24,6 +27,7 @@
   - [x] Add rate limiting logic
   - [x] Implement retry mechanism
   - [x] Add error handling
+  - [x] Add type annotations
 - [ ] Write tests for ConfluenceClient
   - [ ] Authentication tests
   - [ ] CRUD operation tests
@@ -38,6 +42,8 @@
   - [x] Table conversion
   - [x] Image handling
   - [x] Link processing
+  - [x] Add type annotations
+  - [x] Fix f-string formatting
 - [ ] Write converter tests
   - [ ] Basic syntax tests
   - [ ] Complex element tests
@@ -49,6 +55,7 @@
   - [x] Create JSON storage
   - [x] Implement path-to-ID mapping
   - [x] Add state recovery logic
+  - [x] Add type annotations
 - [ ] Write state management tests
   - [ ] Storage tests
   - [ ] Recovery tests
@@ -63,6 +70,7 @@
   - [x] Add event debouncing
   - [x] Implement directory scanning
   - [x] Add change detection logic
+  - [x] Add type annotations
 - [ ] Write file monitoring tests
   - [ ] Event handling tests
   - [ ] Debouncing tests
@@ -77,6 +85,7 @@
   - [x] Add hierarchy management
   - [x] Implement error handling
   - [x] Add recovery mechanisms
+  - [x] Add type annotations
 - [ ] Write sync engine tests
   - [ ] Queue processing tests
   - [ ] Hierarchy tests
@@ -90,6 +99,7 @@
   - [x] Implement base app class
   - [x] Add screen management
   - [x] Create navigation logic
+  - [x] Add type annotations
 - [ ] Write UI tests
   - [ ] Layout tests
   - [ ] Navigation tests

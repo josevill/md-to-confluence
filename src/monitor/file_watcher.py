@@ -21,10 +21,12 @@ class MarkdownFileEventHandler(FileSystemEventHandler):
 
     def __init__(
         self: "MarkdownFileEventHandler",
+        docs_dir: Path,
         event_callback: Callable[[SyncEvent], None],
         debounce_interval: float = 1.0,
     ) -> None:
         """Initialize the MarkdownFileEventHandler."""
+        self.docs_dir = docs_dir.resolve()
         self.event_callback = event_callback
         self.debounce_interval = debounce_interval
         self._last_event_time = {}
@@ -32,8 +34,16 @@ class MarkdownFileEventHandler(FileSystemEventHandler):
 
     def _should_process(self: "MarkdownFileEventHandler", file_path: Path) -> bool:
         """Check if the file should be processed."""
+        try:
+            # Check if file is under docs_dir
+            file_path.relative_to(self.docs_dir)
+        except ValueError:
+            logger.warning(f"File '{file_path!r}' is not in directory '{self.docs_dir!r}'")
+            return False
+
         if file_path.suffix != ".md":
             return False
+
         now = time.time()
         with self._lock:
             last_time = self._last_event_time.get(file_path, 0)
@@ -45,23 +55,29 @@ class MarkdownFileEventHandler(FileSystemEventHandler):
     def on_created(self: "MarkdownFileEventHandler", event: FileSystemEvent) -> None:
         """Handle file creation event."""
         if not event.is_directory:
-            file_path = Path(event.src_path)
+            file_path = Path(event.src_path).resolve()
             if self._should_process(file_path):
                 self.event_callback(SyncEvent("created", file_path))
 
     def on_modified(self: "MarkdownFileEventHandler", event: FileSystemEvent) -> None:
         """Handle file modification event."""
         if not event.is_directory:
-            file_path = Path(event.src_path)
+            file_path = Path(event.src_path).resolve()
             if self._should_process(file_path):
                 self.event_callback(SyncEvent("modified", file_path))
 
     def on_deleted(self: "MarkdownFileEventHandler", event: FileSystemEvent) -> None:
         """Handle file deletion event."""
         if not event.is_directory:
-            file_path = Path(event.src_path)
-            # No debounce for deletes
-            self.event_callback(SyncEvent("deleted", file_path))
+            file_path = Path(event.src_path).resolve()
+            # No debounce for deletes, but still check if it's under docs_dir
+            try:
+                file_path.relative_to(self.docs_dir)
+                self.event_callback(SyncEvent("deleted", file_path))
+            except ValueError:
+                logger.warning(
+                    f"Ignoring delete event for file outside docs directory: {file_path}"
+                )
 
 
 class FileMonitor:
@@ -74,11 +90,12 @@ class FileMonitor:
         debounce_interval: float = 1.0,
     ) -> None:
         """Initialize the FileMonitor."""
-        self.docs_dir = docs_dir
+        self.docs_dir = docs_dir.resolve()
         self.sync_engine = sync_engine
         self.debounce_interval = debounce_interval
         self._observer = Observer()
         self._event_handler = MarkdownFileEventHandler(
+            docs_dir=self.docs_dir,
             event_callback=self.sync_engine.enqueue_event,
             debounce_interval=self.debounce_interval,
         )
@@ -88,8 +105,7 @@ class FileMonitor:
     def start(self: "FileMonitor") -> None:
         """Start the FileMonitor."""
         logger.info(f"Starting FileMonitor for {self.docs_dir}")
-        docs_dir_str = str(self.docs_dir)
-        self._observer.schedule(self._event_handler, docs_dir_str, recursive=True)
+        self._observer.schedule(self._event_handler, str(self.docs_dir), recursive=True)
         self._observer.start()
         # Initial scan for untracked files
         self.sync_engine.initial_scan()

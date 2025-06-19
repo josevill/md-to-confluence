@@ -1,7 +1,7 @@
 {
   "docs_dir": "docs",
   "state_file": "sync_state.json",
-  "confluence_url": "https://your-confluence-instance",
-  "confluence_pat": "your-personal-access-token",
+  "confluence_url": "https://your-instance.atlassian.net",
+  "confluence_pat": "your-token",
   "space_key": "YOURSPACEKEY"
 }

@@ -1,6 +1,7 @@
 """Confluence API client for interacting with Confluence Server/Data Center."""
 
 import logging
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -12,6 +13,48 @@ logger = logging.getLogger(__name__)
 
 class ConfluenceClient:
     """Client for interacting with Confluence API."""
+
+    _instance = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def get_instance(
+        cls: type["ConfluenceClient"],
+        base_url: Optional[str] = None,
+        token: Optional[str] = None,
+        space_key: Optional[str] = None,
+        retry_max_attempts: int = 3,
+        retry_backoff_factor: float = 1.0,
+    ) -> "ConfluenceClient":
+        """Get the singleton instance of ConfluenceClient.
+
+        Args:
+            base_url: Base URL of the Confluence instance
+            token: Personal Access Token for authentication
+            space_key: Key of the Confluence space to work with
+            retry_max_attempts: Maximum retry attempts for failed requests
+            retry_backoff_factor: Backoff factor for retry delays
+
+        Returns:
+            The singleton instance of ConfluenceClient
+
+        Raises:
+            ValueError: If required parameters are missing on first initialization
+        """
+        with cls._lock:
+            if cls._instance is None:
+                if not all([base_url, token, space_key]):
+                    raise ValueError(
+                        "base_url, token, and space_key are required for first initialization"
+                    )
+                cls._instance = cls(
+                    base_url=base_url,
+                    token=token,
+                    space_key=space_key,
+                    retry_max_attempts=retry_max_attempts,
+                    retry_backoff_factor=retry_backoff_factor,
+                )
+            return cls._instance
 
     def __init__(
         self,
@@ -29,7 +72,13 @@ class ConfluenceClient:
             space_key: Key of the Confluence space to work with
             retry_max_attempts: Maximum retry attempts for failed requests
             retry_backoff_factor: Backoff factor for retry delays
+
+        Raises:
+            Exception: If trying to create a new instance directly
         """
+        if ConfluenceClient._instance is not None:
+            raise Exception("ConfluenceClient is a singleton. Use get_instance()")
+
         self.base_url = base_url.rstrip("/")
         self.space_key = space_key
         self.retry_max_attempts = retry_max_attempts
