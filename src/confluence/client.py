@@ -303,15 +303,13 @@ class ConfluenceClient:
 
         while True:
             response = self.get_space_pages(limit=limit, start=start)
-            pages = response.get("results", [])
 
-            if not pages:
+            if not response:
                 break
 
-            all_pages.extend(pages)
+            all_pages.extend(response)
 
-            # Check if there are more pages to fetch
-            if len(pages) < limit:
+            if len(response) < limit:
                 break
 
             start += limit
