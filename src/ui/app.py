@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal
+from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
@@ -158,7 +158,7 @@ class MDToConfluenceApp(App):
         """Compose the app."""
         yield Header(show_clock=True)
         with Container():
-            with Horizontal():
+            with Vertical():
                 yield self.data_table
                 yield self.log_widget
         yield Footer()
