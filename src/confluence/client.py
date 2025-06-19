@@ -162,7 +162,19 @@ class ConfluenceClient:
         if parent_id:
             create_params["ancestors"] = [{"id": parent_id}]
 
-        return self._retry_with_backoff(self.client.create_page, **create_params)
+        result = self._retry_with_backoff(self.client.create_page, **create_params)
+
+        # After successful page creation, get and log all pages in the space
+        try:
+            all_pages = self.list_all_space_pages()
+            page_titles = [page.get("title", "Unknown") for page in all_pages]
+            logger.info(
+                f"Pages in space '{self.space_key!r}' after creating '{title!r}': {page_titles}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to retrieve pages list after creating '{title!r}': {e}")
+
+        return result
 
     def update_page(
         self: "ConfluenceClient",
@@ -249,3 +261,60 @@ class ConfluenceClient:
         return self._retry_with_backoff(
             self.client.get_page_child_by_type, page_id=parent_id, type="page"
         )
+
+    def get_space_pages(
+        self: "ConfluenceClient", limit: int = 50, start: int = 0, expand: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get all pages within the Confluence space.
+
+        This method is used to check if pages have been uploaded/updated appropriately
+        within the session's Confluence Space.
+
+        Args:
+            limit: Maximum number of pages to retrieve per request (default: 50)
+            start: Starting index for pagination (default: 0)
+            expand: Additional properties to expand in the response (optional)
+
+        Returns:
+            Dict containing the pages information and pagination details
+        """
+        logger.info(f"Retrieving pages from space: {self.space_key}")
+        return self._retry_with_backoff(
+            self.client.get_all_pages_from_space,
+            space=self.space_key,
+            start=start,
+            limit=limit,
+            expand=expand,
+        )
+
+    def list_all_space_pages(self: "ConfluenceClient") -> list[Dict[str, Any]]:
+        """Get all pages within the Confluence space (handles pagination automatically).
+
+        This method retrieves all pages from the space by handling pagination automatically,
+        making it easier to check the complete state of pages in the space.
+
+        Returns:
+            List containing all pages in the space
+        """
+        logger.info(f"Retrieving all pages from space: {self.space_key}")
+        all_pages = []
+        start = 0
+        limit = 50
+
+        while True:
+            response = self.get_space_pages(limit=limit, start=start)
+            pages = response.get("results", [])
+
+            if not pages:
+                break
+
+            all_pages.extend(pages)
+
+            # Check if there are more pages to fetch
+            if len(pages) < limit:
+                break
+
+            start += limit
+
+        logger.info(f"Retrieved {len(all_pages)} total pages from space: {self.space_key}")
+        return all_pages

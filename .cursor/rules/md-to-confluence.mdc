@@ -1,0 +1,13 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+- The linter flake8 has an enforcement of 100 chars lines, do not exceed 100 characters per line written.
+- Use 3.10 Pythonista approaches to write your code
+- When in doubt, run the linter flake8
+- If you need to validate that a code is ready to be shipped, create a commit to the master branch in the local Git repo, this will trigger pre-commit and let you know if anything is wrong.
+- If a file is going to be bigger than 400 lines, split it.
+- If it is a new chat/session, always check for the above rules.
+- Keep the [tasks-list.md](mdc:tasks-list.md) file up-to-date with whatever you do, also keep track of possible improvements
+- Keep your explanations short, no need to over elaborate over things unless it is something complex that needs the data to be shown and mentioned.
