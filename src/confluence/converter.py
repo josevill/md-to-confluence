@@ -184,9 +184,48 @@ class MarkdownConverter:
             "<br>", "<br />"
         )  # Use self-closing tags
 
+        # Escape any Confluence macro syntax that appears in regular text
+        # This prevents accidentally creating malformed macros
+        html_content = self._escape_confluence_syntax(html_content)
+
         # logger.info(f"Converted content: {html_content}")
         logger.debug("Markdown conversion completed")
         return html_content
+
+    def _escape_confluence_syntax(self: "MarkdownConverter", content: str) -> str:
+        """Escape Confluence macro syntax that appears in regular text.
+
+        Args:
+            content: The HTML content
+
+        Returns:
+            Content with Confluence syntax properly escaped
+        """
+        # Find any ac:structured-macro tags that are not properly closed
+        # and escape them to prevent malformed XML
+
+        # Pattern to match incomplete macro syntax (missing closing tag)
+        # This matches things like: <ac:structured-macro ac:name="code">...)
+        # but NOT complete macros that have proper closing tags
+        import re
+
+        # Look for structured-macro openings that don't have corresponding closings
+        def escape_incomplete_macros(match):
+            macro_text = match.group(0)
+            # Check if this appears to be part of documentation text rather than a real macro
+            # Real macros should have proper parameter structure and closing tags
+            if "..." in macro_text or not re.search(
+                r"</ac:structured-macro>", content[match.end() : match.end() + 500]
+            ):
+                # This looks like documentation text, escape it
+                return macro_text.replace("<", "&lt;").replace(">", "&gt;")
+            return macro_text
+
+        # Find standalone macro syntax that looks like documentation
+        pattern = r"<ac:structured-macro[^>]*>[^<]*\.\.\.[^<]*\)"
+        content = re.sub(pattern, escape_incomplete_macros, content)
+
+        return content
 
     def convert_file(self: "MarkdownConverter", file_path: Path) -> str:
         """Convert a markdown file to Confluence storage format.

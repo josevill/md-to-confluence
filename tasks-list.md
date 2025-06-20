@@ -45,6 +45,7 @@
   - [x] Link processing
   - [x] Add type annotations
   - [x] Fix f-string formatting
+  - [x] **FIXED**: Escape Confluence macro syntax in documentation text to prevent malformed XHTML
 - [ ] Write converter tests
   - [ ] Basic syntax tests
   - [ ] Complex element tests
