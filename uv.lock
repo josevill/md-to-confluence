@@ -630,6 +630,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "atlassian-python-api" },
     { name = "markdown" },
+    { name = "requests" },
     { name = "textual" },
     { name = "textual-dev" },
     { name = "watchdog" },
@@ -646,6 +647,7 @@ dev = [
 requires-dist = [
     { name = "atlassian-python-api", specifier = ">=4.0.4" },
     { name = "markdown", specifier = ">=3.5.2" },
+    { name = "requests", specifier = ">=2.32.0" },
     { name = "textual", specifier = ">=3.4.0" },
     { name = "textual-dev", specifier = ">=1.7.0" },
     { name = "watchdog", specifier = ">=6.0.0" },

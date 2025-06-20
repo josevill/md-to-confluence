@@ -28,6 +28,7 @@
   - [x] Implement retry mechanism
   - [x] Add error handling
   - [x] Add type annotations
+  - [x] **FIXED**: Modified create_page and update_page to use direct HTTP requests instead of atlassian library methods for better Confluence Server compatibility
 - [ ] Write tests for ConfluenceClient
   - [ ] Authentication tests
   - [ ] CRUD operation tests

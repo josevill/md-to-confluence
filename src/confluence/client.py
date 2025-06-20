@@ -5,6 +5,7 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
+import requests
 from atlassian import Confluence
 from requests.exceptions import HTTPError, RequestException
 
@@ -81,15 +82,23 @@ class ConfluenceClient:
 
         self.base_url = base_url.rstrip("/")
         self.space_key = space_key
+        self.token = token
         self.retry_max_attempts = retry_max_attempts
         self.retry_backoff_factor = retry_backoff_factor
 
-        # Initialize the Confluence client
+        # Initialize the Confluence client for read operations only
         self.client = Confluence(
             url=self.base_url,
             token=token,
             verify_ssl=True,
         )
+
+        # Set up headers for direct HTTP requests
+        self.headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
         logger.info(f"Initialized Confluence client for space: {space_key}")
 
     def _retry_with_backoff(
@@ -128,6 +137,35 @@ class ConfluenceClient:
 
         raise Exception(f"Failed after {self.retry_max_attempts} retries")
 
+    def _make_direct_request(
+        self, method: str, endpoint: str, data: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Make a direct HTTP request to Confluence API.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE)
+            endpoint: API endpoint (relative to base_url)
+            data: Optional JSON data for the request
+
+        Returns:
+            JSON response from the API
+
+        Raises:
+            HTTPError: If the request fails
+        """
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        logger.debug(f"Making {method} request to {url}")
+
+        response = requests.request(
+            method=method, url=url, headers=self.headers, json=data, verify=True
+        )
+
+        if not response.ok:
+            logger.error(f"Request failed: {response.status_code} - {response.text}")
+            response.raise_for_status()
+
+        return response.json()
+
     def create_page(
         self: "ConfluenceClient",
         title: str,
@@ -135,7 +173,7 @@ class ConfluenceClient:
         parent_id: Optional[str] = None,
         representation: str = "storage",
     ) -> Dict[str, Any]:
-        """Create a new page in Confluence.
+        """Create a new page in Confluence using direct HTTP request.
 
         Args:
             title: Title of the page
@@ -147,28 +185,24 @@ class ConfluenceClient:
             Dict containing the created page information
         """
         logger.info(f"Creating page: {title}")
-        # create_params = {
-        #     "type": "page",
-        #     "title": title,
-        #     "space": {"key": self.space_key},
-        #     "body": {
-        #         "storage": {
-        #             "value": body,
-        #             "representation": representation,
-        #         }
-        #     },
-        # }
 
-        # if parent_id:
-        #     create_params["ancestors"] = [{"id": parent_id}]
+        create_params = {
+            "type": "page",
+            "title": title,
+            "space": {"key": self.space_key},
+            "body": {
+                "storage": {
+                    "value": body,
+                    "representation": representation,
+                }
+            },
+        }
+
+        if parent_id:
+            create_params["ancestors"] = [{"id": parent_id}]
 
         result = self._retry_with_backoff(
-            self.client.create_page,
-            space=self.space_key,
-            title=title,
-            body=body,
-            parent_id=parent_id,
-            representation=representation,
+            self._make_direct_request, "POST", "rest/api/content/", create_params
         )
 
         # After successful page creation, get and log all pages in the space
@@ -190,7 +224,7 @@ class ConfluenceClient:
         body: str,
         representation: str = "storage",
     ) -> Dict[str, Any]:
-        """Update an existing page in Confluence.
+        """Update an existing page in Confluence using direct HTTP request.
 
         Args:
             page_id: ID of the page to update
@@ -203,19 +237,27 @@ class ConfluenceClient:
         """
         logger.info(f"Updating page: {title} (ID: {page_id})")
 
+        # Get current page info to get the version number
         curr_page = self._retry_with_backoff(self.client.get_page_by_id, page_id)
         version = curr_page["version"]["number"]
 
         update_params = {
-            "page_id": page_id,
-            "title": title,
-            "body": body,
+            "id": page_id,
             "type": "page",
-            "version": version + 1,
-            "representation": representation,
+            "title": title,
+            "space": {"key": self.space_key},
+            "body": {
+                "storage": {
+                    "value": body,
+                    "representation": representation,
+                }
+            },
+            "version": {"number": version + 1},
         }
 
-        return self._retry_with_backoff(self.client.update_page, **update_params)
+        return self._retry_with_backoff(
+            self._make_direct_request, "PUT", f"rest/api/content/{page_id}", update_params
+        )
 
     def delete_page(self: "ConfluenceClient", page_id: str) -> None:
         """Delete a page from Confluence.
