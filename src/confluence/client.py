@@ -147,22 +147,29 @@ class ConfluenceClient:
             Dict containing the created page information
         """
         logger.info(f"Creating page: {title}")
-        create_params = {
-            "type": "page",
-            "title": title,
-            "space": {"key": self.space_key},
-            "body": {
-                "storage": {
-                    "value": body,
-                    "representation": representation,
-                }
-            },
-        }
+        # create_params = {
+        #     "type": "page",
+        #     "title": title,
+        #     "space": {"key": self.space_key},
+        #     "body": {
+        #         "storage": {
+        #             "value": body,
+        #             "representation": representation,
+        #         }
+        #     },
+        # }
 
-        if parent_id:
-            create_params["ancestors"] = [{"id": parent_id}]
+        # if parent_id:
+        #     create_params["ancestors"] = [{"id": parent_id}]
 
-        result = self._retry_with_backoff(self.client.create_page, **create_params)
+        result = self._retry_with_backoff(
+            self.client.create_page,
+            space=self.space_key,
+            title=title,
+            body=body,
+            parent_id=parent_id,
+            representation=representation,
+        )
 
         # After successful page creation, get and log all pages in the space
         try:
