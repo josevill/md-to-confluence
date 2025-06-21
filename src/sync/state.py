@@ -22,33 +22,109 @@ class SyncState:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self._state = self._load_state()
 
+    def _get_default_state(self: "SyncState") -> dict:
+        """Get the default empty state structure.
+
+        Returns:
+            Default state dictionary
+        """
+        return {
+            "file_to_page": {},
+            "page_to_file": {},
+            "last_sync": {},
+            "deleted_pages": [],
+        }
+
+    def _validate_state(self: "SyncState", state: dict) -> bool:
+        """Validate that the state has the required structure.
+
+        Args:
+            state: State dictionary to validate
+
+        Returns:
+            True if valid, False otherwise
+        """
+        required_keys = {"file_to_page", "page_to_file", "last_sync", "deleted_pages"}
+
+        if not isinstance(state, dict):
+            return False
+
+        if not required_keys.issubset(state.keys()):
+            logger.warning(
+                f"State missing required keys. Expected: {required_keys}, "
+                f"Found: {set(state.keys())}"
+            )
+            return False
+
+        # Validate data types
+        if not isinstance(state["file_to_page"], dict):
+            return False
+        if not isinstance(state["page_to_file"], dict):
+            return False
+        if not isinstance(state["last_sync"], dict):
+            return False
+        if not isinstance(state["deleted_pages"], list):
+            return False
+
+        return True
+
     def _load_state(self: "SyncState") -> dict:
         """Load the state from the JSON file.
 
         Returns:
-            The loaded state or an empty state if file doesn't exist
+            The loaded state or an empty state if file doesn't exist or is corrupted
         """
         if not self.state_file.exists():
-            return {
-                "file_to_page": {},  # Maps file paths to page IDs
-                "page_to_file": {},  # Reverse mapping for quick lookups
-                "last_sync": {},  # Last sync timestamp for each file
-                "deleted_pages": [],  # Track deleted pages to handle conflicts
-            }
+            logger.info(f"State file {self.state_file} doesn't exist, creating new state")
+            return self._get_default_state()
 
         try:
+            if self.state_file.stat().st_size == 0:
+                logger.warning(f"State file {self.state_file} is empty, using default state")
+                return self._get_default_state()
+
             with self.state_file.open("r", encoding="utf-8") as f:
-                state = json.load(f)
-                logger.info(f"Loaded sync state from {self.state_file}")
+                content = f.read().strip()
+
+                if not content:
+                    logger.warning(
+                        f"State file {self.state_file} has no content, using default state"
+                    )
+                    return self._get_default_state()
+
+                state = json.loads(content)
+
+                if not self._validate_state(state):
+                    logger.error(
+                        f"State file {self.state_file} has invalid structure, using default state"
+                    )
+                    self._backup_corrupted_file()
+                    return self._get_default_state()
+
+                logger.info(f"Successfully loaded sync state from {self.state_file}")
                 return state
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse state file: {self.state_file}")
-            # Return empty state on error
-            return self._load_state()
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON in state file {self.state_file}: {e}")
+            self._backup_corrupted_file()
+            return self._get_default_state()
+        except PermissionError as e:
+            logger.error(f"Permission denied accessing state file {self.state_file}: {e}")
+            return self._get_default_state()
         except Exception as e:
-            logger.error(f"Error loading state file: {e}")
-            # Return empty state on error
-            return self._load_state()
+            logger.error(f"Unexpected error loading state file {self.state_file}: {e}")
+            self._backup_corrupted_file()
+            return self._get_default_state()
+
+    def _backup_corrupted_file(self: "SyncState") -> None:
+        """Backup a corrupted state file for investigation."""
+        try:
+            backup_path = self.state_file.with_suffix(".corrupted.bak")
+            if self.state_file.exists():
+                self.state_file.rename(backup_path)
+                logger.info(f"Backed up corrupted state file to {backup_path}")
+        except Exception as e:
+            logger.error(f"Failed to backup corrupted state file: {e}")
 
     def _save_state(self: "SyncState") -> None:
         """Save the current state to the JSON file."""
