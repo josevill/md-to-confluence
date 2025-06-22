@@ -172,11 +172,18 @@ class MDToConfluenceApp(App):
 
     async def refresh_file_statuses(self: "MDToConfluenceApp") -> None:
         """Refresh the file statuses."""
-        self.data_table.clear()
-        for file_path in sorted(self.state.get_all_tracked_files()):
-            # Placeholder, can be improved with real status
-            status = "Synced"
-            self.data_table.add_row(file_path, status)
+        try:
+            self.data_table.clear()
+            for file_path in sorted(self.state.get_all_tracked_files()):
+                # Placeholder, to be implemented with proper statuses in case of
+                # Retries, errors, etc :D
+                status = "Synced"
+                self.data_table.add_row(file_path, status)
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error refreshing file statuses: {e}")
 
     def action_clear_logs(self: "MDToConfluenceApp") -> None:
         """Clear the log widget."""

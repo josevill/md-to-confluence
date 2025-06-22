@@ -127,14 +127,20 @@ class SyncEngine:
             if not file_path.exists():
                 logger.warning(f"File not found: {file_path}")
                 return
-            # Convert markdown to Confluence storage format
+
+            # Convert markdown to Confluence storage format with image extraction
             content = file_path.read_text(encoding="utf-8")
-            storage_format = self.converter.convert(content, base_path=file_path.parent)
+            storage_format, local_images = self.converter.convert_with_images(
+                content, base_path=file_path.parent
+            )
+
             page_id = self.state.get_page_id(str(file_path))
             title = file_path.stem.replace("_", " ").replace("-", " ").title()
             parent_id = self._get_parent_page_id(rel_path)
+
+            # Create or update the page first
             if page_id:
-                # Update existing page
+                # Update existing page with placeholder content
                 self.confluence.update_page(
                     page_id=page_id,
                     title=title,
@@ -142,7 +148,7 @@ class SyncEngine:
                 )
                 logger.info(f"Updated page for {file_path}")
             else:
-                # Create new page
+                # Create new page with placeholder content
                 page = self.confluence.create_page(
                     title=title,
                     body=storage_format,
@@ -150,7 +156,28 @@ class SyncEngine:
                 )
                 page_id = page["id"]
                 logger.info(f"Created page for {file_path} with ID {page_id}")
+                self.state.add_mapping(str(file_path), page_id, time.time())
+
+            # Upload images and update content if there are local images
+            if local_images:
+                uploaded_attachments = self._upload_images(page_id, local_images)
+
+                # Finalize content with image macros
+                final_content = self.converter.finalize_content_with_images(
+                    storage_format, local_images, uploaded_attachments
+                )
+
+                # Update page with final content including image macros
+                self.confluence.update_page(
+                    page_id=page_id,
+                    title=title,
+                    body=final_content,
+                )
+                logger.info(f"Updated page content with {len(uploaded_attachments)} images")
+
+            # Update state with current timestamp
             self.state.add_mapping(str(file_path), page_id, time.time())
+
         elif event.event_type == "deleted":
             page_id = self.state.get_page_id(str(file_path))
             if page_id:
@@ -175,6 +202,35 @@ class SyncEngine:
             return None
         parent_dir = self.docs_dir / rel_path.parent
         return self.state.get_page_id(str(parent_dir))
+
+    def _upload_images(self, page_id: str, local_images: Dict) -> Dict[str, bool]:
+        """Upload local images as attachments to the Confluence page.
+
+        Args:
+            page_id: ID of the Confluence page
+            local_images: Dictionary of local images to upload
+
+        Returns:
+            Dictionary mapping filenames to upload success status
+        """
+        uploaded_attachments = {}
+
+        for _, image_info in local_images.items():
+            file_path = image_info["path"]
+            filename = image_info["filename"]
+
+            try:
+                result = self.confluence.upload_attachment(page_id, file_path)
+                uploaded_attachments[filename] = result is not None
+                if result:
+                    logger.info(f"Successfully uploaded {filename}")
+                else:
+                    logger.error(f"Failed to upload {filename}")
+            except Exception as e:
+                logger.error(f"Error uploading {filename}: {e}")
+                uploaded_attachments[filename] = False
+
+        return uploaded_attachments
 
     def initial_scan(self: "SyncEngine") -> None:
         """

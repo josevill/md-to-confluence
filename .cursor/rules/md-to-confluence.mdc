@@ -10,4 +10,6 @@ alwaysApply: true
 - If a file is bigger than 400 lines, split it.
 - Keep the @tasks-list.md file up-to-date with whatever you do, also keep track of possible improvements
 - Keep your explanations short, no need to over elaborate over things unless it is something complex that needs the data to be shown and mentioned. NO EMOJIS!
-- If this is a new chat/session, always check for the above rules,
+- Always implement a test for a feature first, run the test (it must fail), then implement the feature and run the test again (it MUST pass).
+- Before suggesting something is complete, review the tests for such feature/bugfix and check that all tests pass.
+- If this is a new chat/session, always check for the above rules.

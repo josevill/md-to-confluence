@@ -3,6 +3,7 @@
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import requests
@@ -365,3 +366,75 @@ class ConfluenceClient:
 
         logger.info(f"Retrieved {len(all_pages)} total pages from space: {self.space_key}")
         return all_pages
+
+    def upload_attachment(self, page_id: str, file_path: Path) -> Optional[str]:
+        """Upload file as attachment to a Confluence page.
+
+        Args:
+            page_id: ID of the page to attach the file to
+            file_path: Path to the file to upload
+
+        Returns:
+            Filename if upload successful, None if failed
+
+        Raises:
+            HTTPError: If the request fails
+        """
+        logger.info(f"Uploading attachment {file_path.name} to page {page_id}")
+
+        try:
+            url = f"{self.base_url}/rest/api/content/{page_id}/child/attachment"
+
+            # Check if attachment already exists and delete it first
+            # This ensures we update the attachment rather than create duplicates
+            self._delete_existing_attachment(page_id, file_path.name)
+
+            with open(file_path, "rb") as file:
+                files = {"file": (file_path.name, file, "application/octet-stream")}
+                headers = {
+                    "Authorization": f"Bearer {self.token}",
+                    "X-Atlassian-Token": "no-check",  # Required for file uploads
+                }
+
+                response = requests.post(url, files=files, headers=headers, verify=True)
+
+                if response.ok:
+                    logger.info(f"Successfully uploaded attachment: {file_path.name}")
+                    return file_path.name
+                else:
+                    logger.error(
+                        f"Failed to upload attachment: {response.status_code} - {response.text}"
+                    )
+                    return None
+
+        except Exception as e:
+            logger.error(f"Failed to upload attachment {file_path}: {e}")
+            return None
+
+    def _delete_existing_attachment(self, page_id: str, filename: str) -> None:
+        """Delete existing attachment if it exists.
+
+        Args:
+            page_id: ID of the page
+            filename: Name of the attachment to delete
+        """
+        try:
+            # Get existing attachments
+            url = f"{self.base_url}/rest/api/content/{page_id}/child/attachment"
+            response = requests.get(url, headers=self.headers, verify=True)
+
+            if response.ok:
+                attachments = response.json().get("results", [])
+                for attachment in attachments:
+                    if attachment.get("title") == filename:
+                        attachment_id = attachment.get("id")
+                        delete_url = f"{self.base_url}/rest/api/content/{attachment_id}"
+                        delete_response = requests.delete(
+                            delete_url, headers=self.headers, verify=True
+                        )
+                        if delete_response.ok:
+                            logger.debug(f"Deleted existing attachment: {filename}")
+                        break
+
+        except Exception as e:
+            logger.warning(f"Could not delete existing attachment {filename}: {e}")
