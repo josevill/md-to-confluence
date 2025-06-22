@@ -1,172 +1,273 @@
-# Design Doc: Confluence Markdown Sync (md-to-confluence)
+# MD-to-Confluence
 
-## Overview
+A Python application that automatically syncs Markdown files to Confluence pages with real-time monitoring and a Terminal User Interface (TUI).
 
-CMSync will be a terminal application designed to synchronize a local directory of Markdown files with a Confluence space. The primary goal is to enable a "docs-as-code" workflow, allowing users to write and manage documentation in their preferred local editor and have it automatically published to Confluence, preserving the local folder structure as a page hierarchy.
+## Features
 
-The application will feature a Text User Interface (TUI) built with Textual for configuration, real-time status monitoring, and user interaction. File system changes will be detected by Watchdog, and all interactions with Confluence will be handled via its REST API using a Python wrapper like atlassian-python-api.
+- **Real-time sync** - Monitors markdown files and automatically updates Confluence pages
+- **File hierarchy mapping** - Maintains folder structure as page hierarchy in Confluence
+- **Image handling** - Uploads local images as Confluence attachments
+- **Terminal UI** - Live monitoring with file status and log viewing
+- **Robust error handling** - Retry logic, rate limiting, and graceful failure recovery
+- **Secure token management** - Integration with 1Password CLI for secure token storage
 
-## Core Requirements
+## Installation
 
-### Functional Requirements
+### Prerequisites
 
-**File Monitoring**: The application must monitor a user-specified local directory and all its subdirectories for changes to Markdown (.md) files. This includes file creation, modification, and deletion.
+- Python 3.10 or higher
+- [1Password CLI](https://1password.com/downloads/command-line/) (for secure token storage)
+- Access to a Confluence instance with API permissions
 
-**Content Conversion**: Markdown files must be converted to Confluence's XHTML Storage Format before being uploaded. This includes handling standard Markdown syntax, code blocks, and images.
+### Install Dependencies
 
-Confluence Page Management:
+- Clone the repository:
 
-    Create: A new local Markdown file will create a corresponding new page in Confluence.
+```bash
+git clone <repository-url>
+cd md-to-confluence
+```
 
-    Update: Modifying and saving a local Markdown file will update the content of the corresponding Confluence page.
+- Install using uv (recommended) or pip:
 
-    Delete: Deleting a local Markdown file will trigger the deletion of the corresponding Confluence page. This action must be configurable and require user confirmation.
+```bash
+# Using uv (faster)
+uv install
 
-    Hierarchy Sync: The local directory structure must be replicated in Confluence. A local sub-directory will correspond to a parent page in Confluence, and files within that directory will become its child pages.
+# Or using pip
+pip install -e .
+```
 
-Authentication: The application must authenticate with the Confluence API using a Personal Access Token (PAT), which will be retrieved securely.
+### Set Up 1Password CLI
 
-Text User Interface (TUI):
-Display a list of all monitored Markdown files.
-Show the status of each file (e.g., Synced, Modified, Uploading, Error).
+- Install the 1Password CLI from https://1password.com/downloads/command-line/
+- Sign in to your 1Password account:
 
-Provide a view for application logs and status messages.
+```bash
+op signin
+```
 
-Allow the user to configure essential settings:
+- Create a new item in 1Password to store your Confluence Personal Access Token:
 
-Local directory path to monitor.
-Confluence instance URL.
-Confluence Space Key.
-ID of the root Confluence page under which the hierarchy will be created.
-Provide controls to start and stop the synchronization service.
+```bash
+op item create --title="ConfluencePAT" --category="api credential" notesPlain="your-confluence-token-here"
+```
 
-### Non-Functional Requirements
+### Generate Confluence Personal Access Token
 
-Security: The Confluence PAT must be handled securely, loaded at runtime, and never hardcoded in source files or logs. Your get_confluence_pat_1password utility is a perfect fit for this.
+1. Go to your Confluence settings
+2. Navigate to Personal Access Tokens
+3. Create a new token with appropriate permissions
+4. Store the token in 1Password as described above
 
-Performance: The TUI must remain responsive at all times. API calls and file processing must be handled in background workers to avoid blocking the user interface.
+## Configuration
 
-Reliability: The application must gracefully handle common issues such as network errors, invalid API responses, and API rate limiting.
+### Create Configuration File
 
-Usability: The TUI should be intuitive, providing clear feedback to the user about ongoing processes and errors.
+Create a `config.json` file in the project root:
 
-Maintainability: The codebase will be organized into logical, decoupled components (UI, file monitoring, API client, sync logic) to facilitate future development and maintenance.
+```json
+{
+  "confluence": {
+    "base_url": "https://your-domain.atlassian.net",
+    "space_key": "YOUR_SPACE_KEY",
+    "token_1password_item": "ConfluencePAT",
+    "retry_max_attempts": 3,
+    "retry_backoff_factor": 1.0
+  },
+  "sync": {
+    "docs_dir": "docs",
+    "initial_scan": true,
+    "debounce_delay": 2.0
+  },
+  "ui": {
+    "refresh_interval": 1.0,
+    "log_lines": 100
+  }
+}
+```
 
-## Architecture and Design
+### Configuration Options
 
-The application will be composed of several distinct components that work together, orchestrated by a central SyncEngine.
+#### Confluence Section
 
-### Core Components
+- `base_url` - Your Confluence instance URL
+- `space_key` - The Confluence space key where pages will be created
+- `token_1password_item` - Name of the 1Password item containing your PAT
+- `retry_max_attempts` - Number of retry attempts for failed API calls
+- `retry_backoff_factor` - Backoff multiplier for retry delays
 
-#### TUI (Textual App): The user-facing component
+#### Sync Section
 
-**Responsibilities**: Render all UI elements (widgets like DataTable, Header, Footer, Log), capture user input for configuration, and display the real-time status of files and the sync process.
+- `docs_dir` - Directory to monitor for markdown files
+- `initial_scan` - Whether to scan existing files on startup
+- `debounce_delay` - Delay in seconds before processing file changes
 
-**Implementation**: It will be the main entry point of the application, built by subclassing textual.app.App. It will use background workers (@work) for any long-running tasks to keep the UI from freezing.
+#### UI Section
 
-#### File Monitor (Watchdog): The file system event listener
+- `refresh_interval` - UI refresh rate in seconds
+- `log_lines` - Number of log lines to display in the UI
 
-**Responsibilities**: Monitor the target directory recursively for file events (on_created, on_modified, on_deleted). It will run in a dedicated background thread and place detected events onto a thread-safe queue for the SyncEngine to process.
+## Usage
 
-**Implementation**: An Observer thread will be scheduled with a custom FileSystemEventHandler subclass.
+### Command Line Interface
 
-#### Confluence Client (atlassian-python-api): A wrapper for API interactions
+Run the application with the TUI:
 
-**Responsibilities**: Handle all communication with the Confluence REST API. This includes authentication with the PAT, creating, reading, updating, and deleting pages and attachments.
+```bash
+python main.py
+```
 
-**Implementation**: A dedicated class that encapsulates an instance of atlassian.Confluence. It will be configured with the URL and PAT. Based on your script, the PAT will be passed using the token parameter, which is suitable for Confluence Data Center/Server instances. If targeting Confluence Cloud, the library typically expects the API token to be passed as the password parameter along with a username (email). The client should be designed to accommodate this if needed.
+### TUI Controls
 
-#### Markdown Processor: The content conversion utility
+- `q` or `Ctrl+C` - Quit the application
+- `c` - Clear log display
+- `Tab` - Navigate between UI sections
 
-**Responsibilities**: Convert Markdown text into the Confluence XHTML Storage Format. This is a critical step, as Confluence does not render raw Markdown via the API; it requires a specific XHTML structure.
+### File Organization
 
-**Implementation**: We will leverage a specialized library like markdown-to-confluence  or md2cf , which are designed to handle this conversion, including syntax for code blocks, tables, and other elements.
+The application maps your local file structure to Confluence page hierarchy:
 
-#### Sync Engine: The central coordinator
+```markdown
+docs/
+├── index.md              → Root page in space
+├── getting-started.md    → Child page
+└── guides/
+    ├── user-guide.md     → Parent page in "guides" section
+    └── admin-guide.md    → Child page under "guides"
+```
 
-**Responsibilities**:
+### Markdown Features
 
-- Orchestrate the entire sync process
-- Process events from the FileMonitor's queue.
-- Maintain a state mapping between local file paths and their corresponding Confluence page IDs.
-- Determine the correct parent-child page relationships based on the file system structure.
-- Instruct the MarkdownProcessor and ConfluenceClient to perform their tasks.
-- Update the application's shared state, which the TUI will reflect.
+Supported markdown features:
 
-### State Management: The Sync Map
+- Headers (become page sections)
+- Lists (bulleted and numbered)
+- Tables
+- Code blocks (converted to Confluence macros)
+- Images (uploaded as attachments)
+- Links (internal and external)
+- Bold/italic text
+- Blockquotes
+- Horizontal rules
 
-A crucial design element is a persistent local cache (e.g., a sync_map.json file or a small SQLite database) that maps local file paths to Confluence page IDs.
+### Image Handling
 
-    { "path/to/local/doc.md": "1234567" }
+Local images are automatically:
 
-This map is essential for performance and correctness:
+1. Detected in markdown content
+2. Uploaded as Confluence attachments
+3. Replaced with proper Confluence image macros
+4. Cached to avoid re-uploading unchanged images
 
-**Updates**: To update a page, we need its ID. Searching by title is slow and unreliable. The map provides an instant lookup.
-Deletes: To delete a page, we need its ID.
+Supported formats: PNG, JPG, JPEG, GIF, SVG, WEBP
 
-**Renames/Moves**: A file move can be detected as a delete and a create. The map helps identify this as a rename, allowing the tool to potentially move the page in Confluence rather than re-creating it.
+## Troubleshooting
 
-**Offline Changes**: When the app starts, it will scan the local directory and use this map to determine which files are new, which have been deleted, and which need checking for modifications since the last run.
+### Common Issues
 
-## Key Considerations and Technical Deep Dive
+**"Configuration file not found"**
 
-### Confluence API and Content
+- Ensure `config.json` exists in the project root
+- Check file permissions
 
-**Authentication with PAT**: Your current script uses token=CONFLUENCE_PAT. This is the correct approach for Data Center/Server instances. The design will proceed with this, but we must be aware that for Cloud, the library often requires username and password (where the PAT is the password). The ConfluenceClient should make this configurable.
+**"1Password CLI not found"**
 
-**Markdown to XHTML**: This is the most complex part of the content handling. Simple Markdown-to-HTML libraries are insufficient. We must use a tool that specifically targets the Confluence Storage Format to ensure elements like code blocks (<ac:structured-macro ac:name="code">...) render correctly. The library markdown-to-confluence appears to be a strong candidate.
+- Install 1Password CLI: https://1password.com/downloads/command-line/
+- Ensure `op` command is in your PATH
 
-**Page Hierarchy**: To create a page as a child of another, the create_page API call requires the parent_id.
+**"Failed to authenticate with Confluence"**
 
-The SyncEngine's logic will be:
+- Verify your Personal Access Token is correct
+- Check that the token has appropriate permissions
+- Ensure the base_url and space_key are correct
 
-    For a file docs/project-a/feature.md, determine its parent directory (docs/project-a).
-    Look up the page ID for the parent directory in the sync_map.
+**"Permission denied" errors**
 
-    If the parent page doesn't exist, create it first, then create the child page.
+- Check file system permissions for the docs directory
+- Ensure write access to the logs directory
 
-    The root directory will be parented to the user-configured root page ID.
+### Debug Mode
 
-**API Rate Limiting**: For Cloud instances, this is a major consideration. The application must handle 429 Too Many Requests responses by implementing an exponential backoff-and-retry strategy. The atlassian-python-api library's RestClient has parameters like backoff_and_retry and retry_with_header that should be utilized.
+Enable debug logging by setting the log level in `config.py`:
 
-### File Monitoring and Sync Logic
+```python
+setup_logging(level=logging.DEBUG)
+```
 
-**Initial Scan**: On startup, the application must perform a full scan of the monitored directory to build an initial state and compare it against the sync_map to find changes made while the app was closed.
+### Log Files
 
-**Event Debouncing**: Text editors often fire multiple modification events when saving a file. The SyncEngine should implement a debouncing mechanism (e.g., waiting a short period after an event before processing it) to prevent redundant uploads for a single user action.
+Application logs are stored in `logs/md_to_confluence.log` with automatic rotation.
 
-**Deletion Safety**: Deleting a Confluence page is irreversible. The feature should be disabled by default. When enabled, the TUI must present a clear confirmation dialog before proceeding with the deletion.
+## Development
 
-### TUI Implementation
+### Running Tests
 
-**Asynchronous Operations**: All interactions with the SyncEngine (which will make network calls) must be done asynchronously from the TUI's perspective using Textual's @work decorator. This ensures the UI remains fluid and responsive.
+```bash
+# Run all tests
+python -m pytest
 
-**Reactive UI**: The list of files and their statuses should be stored in a reactive variable on the main App class. A watch method will monitor this variable for changes and automatically update the DataTable widget, simplifying UI updates.
+# Run specific test file
+python -m pytest tests/test_confluence_client.py
 
-## Phased Implementation Plan
+# Run with coverage
+python -m pytest --cov=src
+```
 
-### Phase 1: Core Command-Line Logic (No TUI)
+### Code Quality
 
-- Develop the ConfluenceClient class, perfecting PAT authentication and page creation/updating. ⚙️
-- Integrate the chosen Markdown-to-XHTML library and test conversions. ⚙️
-- Build the SyncEngine with the sync_map logic for syncing a single file. ⚙️
-- Create a simple command-line script to test syncing an entire directory once. ⚙️
+The project uses:
 
-### Phase 2: File Monitoring Integration
+- Black for code formatting
+- Flake8 for linting (100 character line limit)
+- Pre-commit hooks for quality checks
 
-- Implement the FileMonitor using Watchdog. ⚙️
-- Integrate it with the SyncEngine using a queue to process file events in real-time. ⚙️
+```bash
+# Format code
+black src/ tests/
 
-### Phase 3: TUI Development
+# Run linter
+flake8 src/ tests/
 
-- Build the main Textual application layout. ⚙️
-- Create a DataTable to display file statuses, driven by the SyncEngine's state. ⚙️
-- Implement the configuration screen to manage settings. ⚙️
-- Connect UI controls (e.g., "Start/Stop" buttons) to the SyncEngine. ⚙️
+# Install pre-commit hooks
+pre-commit install
+```
 
-### Phase 4: Refinement and Hardening
+## Architecture
 
-- Implement robust error handling and display clear error messages in the TUI log. ⚙️
-- Add and test the rate-limiting backoff strategy. ⚙️
-- Implement the safe-delete functionality with user confirmation. ⚙️
-- Write documentation and package the application for distribution. ⚙️
+The application consists of several key components:
+
+- **Configuration** (`src/config.py`) - Configuration management and validation
+- **Confluence Client** (`src/confluence/client.py`) - API interactions with rate limiting
+- **Markdown Converter** (`src/confluence/converter.py`) - Markdown to Confluence format conversion
+- **File Monitor** (`src/monitor/file_watcher.py`) - Real-time file system monitoring
+- **Sync Engine** (`src/sync/engine.py`) - Orchestrates the sync process
+- **State Management** (`src/sync/state.py`) - Tracks file-to-page mappings
+- **TUI** (`src/ui/app.py`) - Terminal user interface
+
+## Security
+
+- Personal Access Tokens are stored securely in 1Password
+- Input validation prevents injection attacks
+- File path sanitization prevents directory traversal
+- Secure HTTPS communication with Confluence API
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Support
+
+For issues and questions:
+
+1. Check the troubleshooting section above
+2. Review existing issues in the repository
+3. Create a new issue with detailed information about your problem

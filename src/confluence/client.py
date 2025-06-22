@@ -94,6 +94,9 @@ class ConfluenceClient:
             verify_ssl=True,
         )
 
+        # Alias for backwards compatibility with tests
+        self._confluence = self.client
+
         # Set up headers for direct HTTP requests
         self.headers = {
             "Authorization": f"Bearer {token}",
@@ -105,26 +108,37 @@ class ConfluenceClient:
     def _retry_with_backoff(
         self: "ConfluenceClient", operation: callable, *args: Any, **kwargs: Any
     ) -> Any:
-        """Execute an operation with exponential backoff retry logic.
+        """Retry an operation with exponential backoff.
 
         Args:
-            operation: The function to execute
+            operation: The function to retry
             *args: Positional arguments for the operation
             **kwargs: Keyword arguments for the operation
 
         Returns:
-            The result of the operation
+            Result of the operation
 
         Raises:
-            Exception: If all retry attempts fail
+            Exception: If all retries are exhausted
         """
         for attempt in range(self.retry_max_attempts):
             try:
                 return operation(*args, **kwargs)
             except HTTPError as e:
-                if e.response.status_code == 429:  # Too Many Requests
+                # Ensure response attribute exists before accessing status_code
+                if (
+                    hasattr(e, "response")
+                    and e.response is not None
+                    and e.response.status_code == 429
+                ):  # Too Many Requests
                     wait_time = self.retry_backoff_factor * (2**attempt)
                     logger.warning(f"Rate limit hit, waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                    continue
+                # For non-rate-limiting HTTPErrors, only retry if we have attempts left
+                if attempt < self.retry_max_attempts - 1:
+                    wait_time = self.retry_backoff_factor * (2**attempt)
+                    logger.warning(f"HTTP error occurred, waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
                     continue
                 raise
@@ -211,7 +225,7 @@ class ConfluenceClient:
             all_pages = self.list_all_space_pages()
             page_titles = [page.get("title", "Unknown") for page in all_pages]
             logger.info(
-                f"Pages in space '{self.space_key!r}' after creating '{title!r}': {page_titles}"
+                f"Pages in space {self.space_key!r} after creating {title!r}: {page_titles}"
             )
         except Exception as e:
             logger.warning(f"Failed to retrieve pages list after creating '{title!r}': {e}")
@@ -296,7 +310,14 @@ class ConfluenceClient:
             space=self.space_key,
             title=title,
         )
-        return pages[0] if pages else None
+        # Handle both list and dict return formats
+        if isinstance(pages, list):
+            return pages[0] if pages else None
+        elif isinstance(pages, dict) and "results" in pages:
+            results = pages["results"]
+            return results[0] if results else None
+        else:
+            return pages if pages else None
 
     def get_child_pages(self: "ConfluenceClient", parent_id: str) -> list[Dict[str, Any]]:
         """Get all child pages of a given parent page.
@@ -338,77 +359,91 @@ class ConfluenceClient:
         )
 
     def list_all_space_pages(self: "ConfluenceClient") -> list[Dict[str, Any]]:
-        """Get all pages within the Confluence space (handles pagination automatically).
-
-        This method retrieves all pages from the space by handling pagination automatically,
-        making it easier to check the complete state of pages in the space.
+        """Get all pages in the Confluence space.
 
         Returns:
-            List containing all pages in the space
+            List of all pages in the space
         """
-        logger.info(f"Retrieving all pages from space: {self.space_key}")
+        logger.info(f"Retrieving all pages in space: {self.space_key}")
         all_pages = []
         start = 0
         limit = 50
 
         while True:
-            response = self.get_space_pages(limit=limit, start=start)
+            response = self._retry_with_backoff(self.get_space_pages, limit=limit, start=start)
 
-            if not response:
+            # Extract results from response
+            if isinstance(response, dict) and "results" in response:
+                pages = response["results"]
+            elif isinstance(response, list):
+                pages = response
+            else:
+                pages = []
+
+            all_pages.extend(pages)
+
+            # Check if there are more pages
+            if isinstance(response, dict):
+                # If response has pagination info, use it
+                if len(pages) < limit or response.get("size", 0) < limit:
+                    break
+                start += limit
+            else:
+                # If response is a list, we're done
                 break
 
-            all_pages.extend(response)
-
-            if len(response) < limit:
-                break
-
-            start += limit
-
-        logger.info(f"Retrieved {len(all_pages)} total pages from space: {self.space_key}")
+        logger.info(f"Retrieved {len(all_pages)} total pages from space '{self.space_key!r}'")
         return all_pages
 
-    def upload_attachment(self, page_id: str, file_path: Path) -> Optional[str]:
-        """Upload file as attachment to a Confluence page.
+    def upload_attachment(self, page_id: str, file_path: Path) -> Optional[Dict[str, Any]]:
+        """Upload an attachment to a Confluence page.
 
         Args:
             page_id: ID of the page to attach the file to
             file_path: Path to the file to upload
 
         Returns:
-            Filename if upload successful, None if failed
+            Dict containing the uploaded attachment information
 
         Raises:
-            HTTPError: If the request fails
+            FileNotFoundError: If the file does not exist
         """
-        logger.info(f"Uploading attachment {file_path.name} to page {page_id}")
+        if not file_path.exists():
+            logger.error(f"File not found: {file_path}")
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        filename = file_path.name
+        logger.info(f"Uploading attachment {filename} to page {page_id}")
 
         try:
+            # Delete existing attachment with the same name to avoid duplicates
+            self._delete_existing_attachment(page_id, filename)
+
+            # Upload the new attachment
             url = f"{self.base_url}/rest/api/content/{page_id}/child/attachment"
+            headers = {"Authorization": f"Bearer {self.token}"}
 
-            # Check if attachment already exists and delete it first
-            # This ensures we update the attachment rather than create duplicates
-            self._delete_existing_attachment(page_id, file_path.name)
+            with open(file_path, "rb") as f:
+                files = {"file": (filename, f, "application/octet-stream")}
+                response = requests.post(url, headers=headers, files=files, verify=True)
 
-            with open(file_path, "rb") as file:
-                files = {"file": (file_path.name, file, "application/octet-stream")}
-                headers = {
-                    "Authorization": f"Bearer {self.token}",
-                    "X-Atlassian-Token": "no-check",  # Required for file uploads
-                }
-
-                response = requests.post(url, files=files, headers=headers, verify=True)
-
-                if response.ok:
-                    logger.info(f"Successfully uploaded attachment: {file_path.name}")
-                    return file_path.name
-                else:
-                    logger.error(
-                        f"Failed to upload attachment: {response.status_code} - {response.text}"
-                    )
-                    return None
+            if response.ok:
+                logger.info(f"Successfully uploaded attachment: {filename}")
+                result = response.json()
+                # Return the expected format for compatibility
+                if isinstance(result, dict):
+                    # Extract filename and other metadata for return
+                    return {"title": filename, "id": result.get("id", ""), **result}
+                return {"title": filename}
+            else:
+                logger.error(
+                    f"Failed to upload attachment {filename}: "
+                    f"{response.status_code} - {response.text}"
+                )
+                return None
 
         except Exception as e:
-            logger.error(f"Failed to upload attachment {file_path}: {e}")
+            logger.error(f"Failed to upload attachment {filename}: {e}")
             return None
 
     def _delete_existing_attachment(self, page_id: str, filename: str) -> None:

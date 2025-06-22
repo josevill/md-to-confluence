@@ -1,7 +1,8 @@
 import json
 import logging
+import shutil
 from pathlib import Path
-from typing import Dict, Optional, Set
+from typing import Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +122,11 @@ class SyncState:
         try:
             backup_path = self.state_file.with_suffix(".corrupted.bak")
             if self.state_file.exists():
-                self.state_file.rename(backup_path)
+
+                shutil.copy2(self.state_file, backup_path)
                 logger.info(f"Backed up corrupted state file to {backup_path}")
+        except PermissionError as e:
+            logger.warning(f"Permission denied creating backup of corrupted state file: {e}")
         except Exception as e:
             logger.error(f"Failed to backup corrupted state file: {e}")
 

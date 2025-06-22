@@ -61,7 +61,15 @@ class MarkdownConverter:
                 "markdown.extensions.attr_list",
                 "markdown.extensions.def_list",
                 "markdown.extensions.footnotes",
-            ]
+                # Better line break handling
+                "markdown.extensions.nl2br",
+            ],
+            extension_configs={
+                "markdown.extensions.toc": {
+                    # Don't add permalink symbols
+                    "permalink": False,
+                }
+            },
         )
 
     def _extract_code_blocks(self: "MarkdownConverter", content: str) -> Tuple[str, dict]:
@@ -219,7 +227,8 @@ class MarkdownConverter:
             filename = image_info["filename"]
             alt_text = image_info["alt"]
 
-            if uploaded_attachments.get(filename, False):
+            # Check if upload was successful using the placeholder key
+            if uploaded_attachments.get(placeholder, False):
                 # Create Confluence attachment image macro
                 width_attr = ' ac:width="600"' if alt_text else ""  # Default width for images
                 image_macro = self.IMAGE_ATTACHMENT_TEMPLATE.format(
