@@ -50,3 +50,8 @@ logs/
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Project default specifics
+sync_state.json
+docs/*
+config.json
