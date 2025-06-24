@@ -55,3 +55,7 @@ logs/
 sync_state.json
 docs/*
 config.json
+
+# IDE Specifics (Claude Code / Codex / Roocode / Cursor / VSCode Copilot)
+tasks-list.md
+.cursor/
