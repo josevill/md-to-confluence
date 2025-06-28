@@ -44,7 +44,7 @@ class TestComponentIntegration:
         mock_client = Mock(spec=ConfluenceClient)
         mock_client.create_page.return_value = {"id": "123", "title": "Test Page"}
         mock_client.update_page.return_value = {"id": "123", "title": "Updated Page"}
-        mock_client.delete_page.return_value = True
+        mock_client.delete_page.return_value = None
         mock_client.upload_attachment.return_value = {"id": "att123"}
         return mock_client
 
@@ -82,8 +82,8 @@ class TestComponentIntegration:
         event = SyncEvent("created", test_file)
         sync_engine._process_event(event)
 
-        # Verify state was updated
-        page_id = sync_engine.state.get_page_id(str(test_file))
+        # Verify state was updated (use resolved path to match SyncEvent behavior)
+        page_id = sync_engine.state.get_page_id(str(test_file.resolve()))
         assert page_id == "123"  # From mock return value
 
         # Verify Confluence operations were called
@@ -142,8 +142,8 @@ def hello():
             # Wait for file system event and processing
             time.sleep(0.3)
 
-            # Verify file was processed
-            page_id = sync_engine.state.get_page_id(str(test_file))
+            # Verify file was processed (use resolved path to match SyncEvent behavior)
+            page_id = sync_engine.state.get_page_id(str(test_file.resolve()))
             assert page_id is not None
 
         finally:

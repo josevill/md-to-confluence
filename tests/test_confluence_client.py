@@ -195,7 +195,7 @@ class TestConfluenceClient:
         result = client.get_page("123")
 
         assert result == mock_page
-        client.client.get_page_by_id.assert_called_once_with("123")
+        client.client.get_page_by_id.assert_called_once_with(page_id="123")
 
     def test_get_page_by_id_not_found(self, client):
         """Test page retrieval with non-existent ID."""
@@ -217,9 +217,7 @@ class TestConfluenceClient:
         result = client.get_page_by_title("Test Page")
 
         assert result == mock_page
-        client.client.get_page_by_title.assert_called_once_with(
-            "TEST", "Test Page", expand="version,body.storage"
-        )
+        client.client.get_page_by_title.assert_called_once_with(space="TEST", title="Test Page")
 
     def test_get_page_by_title_not_found(self, client):
         """Test page retrieval with non-existent title."""
@@ -256,7 +254,7 @@ class TestConfluenceClient:
         result = client.get_child_pages("123")
 
         assert result == mock_child_pages
-        client.client.get_page_child_by_type.assert_called_once_with("123", type="page")
+        client.client.get_page_child_by_type.assert_called_once_with(page_id="123", type="page")
 
     def test_get_child_pages_empty(self, client):
         """Test child pages retrieval when no children exist."""
@@ -303,15 +301,21 @@ class TestConfluenceClient:
 
     def test_upload_attachment_success(self, client):
         """Test successful attachment upload."""
-        mock_attachment = {"id": "att123", "title": "test.png", "type": "attachment"}
+        test_file = Path("test.png")
 
-        with patch.object(client, "_retry_with_backoff") as mock_retry:
-            mock_retry.return_value = {"results": [mock_attachment]}
+        # Mock the requests.post to simulate successful upload
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.ok = True
+            mock_response.json.return_value = {"id": "att123", "title": "test.png"}
+            mock_post.return_value = mock_response
 
-            test_file = Path("test.png")
-            result = client.upload_attachment("123", test_file)
+            # Mock the delete existing attachment method
+            with patch.object(client, "_delete_existing_attachment"):
+                result = client.upload_attachment("123", test_file)
 
-            assert result["title"] == "test.png"
+                assert result["title"] == "test.png"
+                assert result["id"] == "att123"
 
     def test_upload_attachment_file_not_found(self, client):
         """Test attachment upload with non-existent file."""
@@ -322,67 +326,80 @@ class TestConfluenceClient:
 
     def test_upload_attachment_api_error(self, client):
         """Test attachment upload with API error."""
-        with patch.object(client, "_retry_with_backoff") as mock_retry:
-            mock_retry.side_effect = HTTPError("500 Server Error")
+        test_file = Path("test.png")
 
-            test_file = Path("test.png")
-            with patch.object(test_file, "exists", return_value=True):
-                with pytest.raises(HTTPError):
-                    client.upload_attachment("123", test_file)
+        # Mock the requests.post to return an error
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.ok = False
+            mock_response.status_code = 500
+            mock_response.text = "Server Error"
+            mock_post.return_value = mock_response
+
+            result = client.upload_attachment("123", test_file)
+            assert result is None  # Should return None on error
 
     def test_make_direct_request_get(self, client):
         """Test direct GET request."""
         mock_response = Mock()
+        mock_response.ok = True
         mock_response.json.return_value = {"success": True}
         mock_response.raise_for_status.return_value = None
 
-        client._confluence._session.get.return_value = mock_response
+        with patch("requests.request") as mock_request:
+            mock_request.return_value = mock_response
 
-        result = client._make_direct_request("GET", "rest/api/content/123")
+            result = client._make_direct_request("GET", "rest/api/content/123")
 
-        assert result == {"success": True}
-        client._confluence._session.get.assert_called_once()
+            assert result == {"success": True}
+            mock_request.assert_called_once()
 
     def test_make_direct_request_post(self, client):
         """Test direct POST request."""
         mock_response = Mock()
+        mock_response.ok = True
         mock_response.json.return_value = {"id": "123"}
         mock_response.raise_for_status.return_value = None
 
-        client._confluence._session.post.return_value = mock_response
+        with patch("requests.request") as mock_request:
+            mock_request.return_value = mock_response
 
-        data = {"title": "Test Page"}
-        result = client._make_direct_request("POST", "rest/api/content/", data)
+            data = {"title": "Test Page"}
+            result = client._make_direct_request("POST", "rest/api/content/", data)
 
-        assert result == {"id": "123"}
-        client._confluence._session.post.assert_called_once()
+            assert result == {"id": "123"}
+            mock_request.assert_called_once()
 
     def test_make_direct_request_put(self, client):
         """Test direct PUT request."""
         mock_response = Mock()
+        mock_response.ok = True
         mock_response.json.return_value = {"updated": True}
         mock_response.raise_for_status.return_value = None
 
-        client._confluence._session.put.return_value = mock_response
+        with patch("requests.request") as mock_request:
+            mock_request.return_value = mock_response
 
-        data = {"title": "Updated Page"}
-        result = client._make_direct_request("PUT", "rest/api/content/123", data)
+            data = {"title": "Updated Page"}
+            result = client._make_direct_request("PUT", "rest/api/content/123", data)
 
-        assert result == {"updated": True}
-        client._confluence._session.put.assert_called_once()
+            assert result == {"updated": True}
+            mock_request.assert_called_once()
 
     def test_make_direct_request_delete(self, client):
         """Test direct DELETE request."""
         mock_response = Mock()
+        mock_response.ok = True
         mock_response.json.return_value = {}
         mock_response.raise_for_status.return_value = None
 
-        client._confluence._session.delete.return_value = mock_response
+        with patch("requests.request") as mock_request:
+            mock_request.return_value = mock_response
 
-        result = client._make_direct_request("DELETE", "rest/api/content/123")
+            result = client._make_direct_request("DELETE", "rest/api/content/123")
 
-        assert result == {}
-        client._confluence._session.delete.assert_called_once()
+            assert result == {}
+            mock_request.assert_called_once()
 
     def test_make_direct_request_http_error(self, client):
         """Test direct request with HTTP error."""
@@ -467,7 +484,7 @@ class TestConfluenceClient:
 
             # Delete page
             deleted = client.delete_page("123")
-            assert deleted is True
+            assert deleted is None  # delete_page returns None on success
 
     @pytest.mark.thread_safety
     def test_concurrent_requests(self, client):

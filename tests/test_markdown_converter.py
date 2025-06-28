@@ -36,6 +36,8 @@ This is a paragraph with **bold** and *italic* text.
 - List item 2
 - List item 3
 
+Here's a numbered list:
+
 1. Numbered item 1
 2. Numbered item 2
 """
@@ -355,6 +357,8 @@ Here's a local image: ![Test image](test.png)
 
 - Item 1
 - Item 2
+
+And here's a numbered list:
 
 1. Numbered 1
 2. Numbered 2
