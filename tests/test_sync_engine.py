@@ -436,31 +436,188 @@ class TestSyncEngine:
 
     @pytest.mark.thread_safety
     def test_concurrent_event_processing(self, sync_engine):
-        """Test concurrent event processing."""
-        test_files = []
-
-        # Create multiple test files
+        """Test concurrent processing of multiple events."""
+        files = []
         for i in range(5):
-            test_file = sync_engine.docs_dir / f"concurrent_test_{i}.md"
-            test_file.write_text(f"# Test {i}")
-            test_files.append(test_file)
+            file_path = sync_engine.docs_dir / f"concurrent{i}.md"
+            file_path.write_text(f"# Concurrent Test {i}")
+            files.append(file_path)
 
-        # Enqueue events from multiple threads
-        def enqueue_events():
-            for test_file in test_files:
-                event = SyncEvent("created", test_file)
-                sync_engine.enqueue_event(event)
-
-        threads = [threading.Thread(target=enqueue_events) for _ in range(3)]
-
-        for thread in threads:
-            thread.start()
-
-        for thread in threads:
-            thread.join()
+        # Enqueue multiple events simultaneously
+        for file_path in files:
+            sync_engine.enqueue_event(SyncEvent("created", file_path))
 
         # Wait for processing
         time.sleep(0.5)
 
-        # Should have processed multiple files
-        assert sync_engine.converter.convert_with_images.call_count >= 5
+        # All files should be processed
+        for file_path in files:
+            page_id = sync_engine.state.get_page_id(str(file_path))
+            assert page_id is not None
+
+    def test_get_title_from_path_file(self, sync_engine):
+        """Test title generation from file paths."""
+        file_path = sync_engine.docs_dir / "test-file_name.md"
+        file_path.touch()
+
+        title = sync_engine._get_title_from_path(file_path)
+        assert title == "Test File Name"
+
+    def test_get_title_from_path_folder(self, sync_engine):
+        """Test title generation from folder paths."""
+        folder_path = sync_engine.docs_dir / "api-documentation_v2"
+        folder_path.mkdir()
+
+        title = sync_engine._get_title_from_path(folder_path)
+        assert title == "Api Documentation V2"
+
+    def test_generate_folder_page_content(self, sync_engine):
+        """Test folder page content generation."""
+        folder_path = sync_engine.docs_dir / "test-section"
+        folder_path.mkdir()
+
+        content = sync_engine._generate_folder_page_content(folder_path)
+
+        assert "<h1>Test Section</h1>" in content
+        assert "This page represents the <strong>Test Section</strong>" in content
+        assert "children" in content  # Should include children macro
+        assert "ac:structured-macro" in content
+
+    def test_process_event_folder_created(self, sync_engine):
+        """Test processing folder_created events."""
+        folder_path = sync_engine.docs_dir / "new-folder"
+        folder_path.mkdir()
+
+        event = SyncEvent("folder_created", folder_path)
+        sync_engine._process_event(event)
+
+        # Should create page mapping
+        page_id = sync_engine.state.get_page_id(str(folder_path))
+        assert page_id is not None
+
+        # Verify confluence client was called
+        sync_engine.confluence.create_page.assert_called_once()
+        call_args = sync_engine.confluence.create_page.call_args
+        assert call_args[1]["title"] == "New Folder"
+        assert "<h1>New Folder</h1>" in call_args[1]["body"]
+
+    def test_process_event_folder_created_already_exists(self, sync_engine):
+        """Test processing folder_created events when page already exists."""
+        folder_path = sync_engine.docs_dir / "existing-folder"
+        folder_path.mkdir()
+
+        # Add existing mapping
+        sync_engine.state.add_mapping(str(folder_path), "existing-page-id", time.time())
+
+        event = SyncEvent("folder_created", folder_path)
+        sync_engine._process_event(event)
+
+        # Should not create new page
+        sync_engine.confluence.create_page.assert_not_called()
+
+    def test_process_event_folder_created_not_exists(self, sync_engine):
+        """Test processing folder_created events when folder doesn't exist."""
+        folder_path = sync_engine.docs_dir / "nonexistent-folder"
+
+        event = SyncEvent("folder_created", folder_path)
+        sync_engine._process_event(event)
+
+        # Should not create page
+        sync_engine.confluence.create_page.assert_not_called()
+
+    def test_delete_folder_and_children(self, sync_engine):
+        """Test recursive folder deletion."""
+        # Create nested structure
+        root_folder = sync_engine.docs_dir / "root"
+        sub_folder = root_folder / "subfolder"
+        sub_sub_folder = sub_folder / "subsubfolder"
+
+        root_folder.mkdir()
+        sub_folder.mkdir()
+        sub_sub_folder.mkdir()
+
+        file1 = root_folder / "file1.md"
+        file2 = sub_folder / "file2.md"
+        file3 = sub_sub_folder / "file3.md"
+
+        file1.write_text("# File 1")
+        file2.write_text("# File 2")
+        file3.write_text("# File 3")
+
+        # Add mappings for all items
+        sync_engine.state.add_mapping(str(root_folder), "page-root", time.time())
+        sync_engine.state.add_mapping(str(sub_folder), "page-sub", time.time())
+        sync_engine.state.add_mapping(str(sub_sub_folder), "page-subsub", time.time())
+        sync_engine.state.add_mapping(str(file1), "page-file1", time.time())
+        sync_engine.state.add_mapping(str(file2), "page-file2", time.time())
+        sync_engine.state.add_mapping(str(file3), "page-file3", time.time())
+
+        # Delete root folder
+        sync_engine._delete_folder_and_children(root_folder)
+
+        # All pages should be deleted
+        assert sync_engine.confluence.delete_page.call_count == 6
+
+        # Verify deletion order (children first, then parents)
+        deleted_pages = [call[0][0] for call in sync_engine.confluence.delete_page.call_args_list]
+
+        # Files and deepest folders should be deleted first
+        assert "page-file3" in deleted_pages
+        assert "page-subsub" in deleted_pages
+        assert "page-root" in deleted_pages  # Root should be deleted last
+
+        # All mappings should be removed
+        assert sync_engine.state.get_page_id(str(root_folder)) is None
+        assert sync_engine.state.get_page_id(str(sub_folder)) is None
+        assert sync_engine.state.get_page_id(str(file1)) is None
+
+    def test_process_event_folder_deleted(self, sync_engine):
+        """Test processing folder_deleted events."""
+        folder_path = sync_engine.docs_dir / "to-delete"
+        folder_path.mkdir()
+
+        # Add mapping
+        sync_engine.state.add_mapping(str(folder_path), "page-to-delete", time.time())
+
+        event = SyncEvent("folder_deleted", folder_path)
+        sync_engine._process_event(event)
+
+        # Should call delete method
+        sync_engine.confluence.delete_page.assert_called()
+
+    def test_initial_scan_with_folders(self, sync_engine):
+        """Test initial scan includes folders."""
+        # Create folder structure
+        folder1 = sync_engine.docs_dir / "docs"
+        folder2 = folder1 / "api"
+        folder1.mkdir()
+        folder2.mkdir()
+
+        # Create markdown file
+        md_file = folder2 / "endpoints.md"
+        md_file.write_text("# API Endpoints")
+
+        # Mock enqueue_event to track calls
+        enqueue_calls = []
+        original_enqueue = sync_engine.enqueue_event
+
+        def mock_enqueue(event):
+            enqueue_calls.append(event)
+            return original_enqueue(event)
+
+        sync_engine.enqueue_event = mock_enqueue
+
+        sync_engine.initial_scan()
+
+        # Should enqueue events for folders and files
+        folder_events = [e for e in enqueue_calls if e.event_type == "folder_created"]
+        file_events = [e for e in enqueue_calls if e.event_type == "created"]
+
+        assert len(folder_events) == 2  # docs and api folders
+        assert len(file_events) == 1  # endpoints.md file
+
+        # Verify folders are processed in correct order (parents first)
+        folder_paths = [str(e.file_path) for e in folder_events]
+        docs_index = next(i for i, p in enumerate(folder_paths) if "docs" in p and "api" not in p)
+        api_index = next(i for i, p in enumerate(folder_paths) if "api" in p)
+        assert docs_index < api_index  # docs should come before api

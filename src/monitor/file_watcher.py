@@ -1,4 +1,4 @@
-"""FileMonitor: Watches the docs/ directory for .md file changes."""
+"""FileMonitor: Watches the docs/ directory for .md file changes and folder operations."""
 
 import logging
 import threading
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class MarkdownFileEventHandler(FileSystemEventHandler):
-    """EventHandler for .md files."""
+    """EventHandler for .md files and folders."""
 
     def __init__(
         self: "MarkdownFileEventHandler",
@@ -32,7 +32,7 @@ class MarkdownFileEventHandler(FileSystemEventHandler):
         self._last_event_time = {}
         self._lock = threading.Lock()
 
-    def _should_process(self: "MarkdownFileEventHandler", file_path: Path) -> bool:
+    def _should_process_file(self: "MarkdownFileEventHandler", file_path: Path) -> bool:
         """Check if the file should be processed."""
         try:
             # Check if file is under docs_dir
@@ -52,31 +52,101 @@ class MarkdownFileEventHandler(FileSystemEventHandler):
             self._last_event_time[file_path] = now
         return True
 
+    def _should_process_folder(self: "MarkdownFileEventHandler", folder_path: Path) -> bool:
+        """Check if the folder should be processed."""
+        try:
+            folder_path.relative_to(self.docs_dir)
+        except ValueError:
+            logger.warning(f"Folder '{folder_path!r}' is not in directory '{self.docs_dir!r}'")
+            return False
+
+        if any(part.startswith(".") for part in folder_path.parts):
+            return False
+
+        skip_folders = {"__pycache__", ".git", ".vscode", ".idea", "node_modules", ".pytest_cache"}
+        if any(part in skip_folders for part in folder_path.parts):
+            return False
+
+        now = time.time()
+        with self._lock:
+            last_time = self._last_event_time.get(folder_path, 0)
+            if now - last_time < self.debounce_interval:
+                return False
+            self._last_event_time[folder_path] = now
+        return True
+
     def on_created(self: "MarkdownFileEventHandler", event: FileSystemEvent) -> None:
-        """Handle file creation event."""
-        if not event.is_directory:
-            file_path = Path(event.src_path).resolve()
-            if self._should_process(file_path):
-                self.event_callback(SyncEvent("created", file_path))
+        """Handle file/folder creation event."""
+        path = Path(event.src_path).resolve()
+
+        if event.is_directory:
+            if self._should_process_folder(path):
+                logger.debug(f"Folder created: {path}")
+                self.event_callback(SyncEvent("folder_created", path))
+        else:
+            if self._should_process_file(path):
+                logger.debug(f"File created: {path}")
+                self.event_callback(SyncEvent("created", path))
 
     def on_modified(self: "MarkdownFileEventHandler", event: FileSystemEvent) -> None:
         """Handle file modification event."""
         if not event.is_directory:
             file_path = Path(event.src_path).resolve()
-            if self._should_process(file_path):
+            if self._should_process_file(file_path):
+                logger.debug(f"File modified: {file_path}")
                 self.event_callback(SyncEvent("modified", file_path))
 
     def on_deleted(self: "MarkdownFileEventHandler", event: FileSystemEvent) -> None:
-        """Handle file deletion event."""
-        if not event.is_directory:
-            file_path = Path(event.src_path).resolve()
+        """Handle file/folder deletion event."""
+        path = Path(event.src_path).resolve()
+
+        if event.is_directory:
+            try:
+                path.relative_to(self.docs_dir)
+                logger.debug(f"Folder deleted: {path}")
+                self.event_callback(SyncEvent("folder_deleted", path))
+            except ValueError:
+                logger.warning(f"Ignoring delete event for folder outside docs directory: {path}")
+        else:
             # No debounce for deletes, but still check if it's under docs_dir
             try:
-                file_path.relative_to(self.docs_dir)
-                self.event_callback(SyncEvent("deleted", file_path))
+                path.relative_to(self.docs_dir)
+                logger.debug(f"File deleted: {path}")
+                self.event_callback(SyncEvent("deleted", path))
+            except ValueError:
+                logger.warning(f"Ignoring delete event for file outside docs directory: {path}")
+
+    def on_moved(self: "MarkdownFileEventHandler", event: FileSystemEvent) -> None:
+        """Handle file/folder move/rename event."""
+        old_path = Path(event.src_path).resolve()
+        new_path = Path(event.dest_path).resolve()
+
+        if event.is_directory:
+            try:
+                old_path.relative_to(self.docs_dir)
+                new_path.relative_to(self.docs_dir)
+                logger.debug(f"Folder moved: {old_path} -> {new_path}")
+                # Treat as delete old + create new for simplicity
+                self.event_callback(SyncEvent("folder_deleted", old_path))
+                if self._should_process_folder(new_path):
+                    self.event_callback(SyncEvent("folder_created", new_path))
             except ValueError:
                 logger.warning(
-                    f"Ignoring delete event for file outside docs directory: {file_path}"
+                    f"Ignoring move event for folder outside docs directory: {old_path} -> {new_path}"
+                )
+        else:
+            try:
+                old_path.relative_to(self.docs_dir)
+                new_path.relative_to(self.docs_dir)
+                if old_path.suffix == ".md" or new_path.suffix == ".md":
+                    logger.debug(f"File moved: {old_path} -> {new_path}")
+                    # Treat as delete old + create new for simplicity
+                    self.event_callback(SyncEvent("deleted", old_path))
+                    if self._should_process_file(new_path):
+                        self.event_callback(SyncEvent("created", new_path))
+            except ValueError:
+                logger.warning(
+                    f"Ignoring move event for file outside docs directory: {old_path} -> {new_path}"
                 )
 
 

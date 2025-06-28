@@ -52,14 +52,14 @@ class TestMarkdownFileEventHandler:
         md_file = temp_docs_dir / "test.md"
         md_file.touch()
 
-        assert handler._should_process(md_file) is True
+        assert handler._should_process_file(md_file) is True
 
     def test_should_process_non_md_file(self, handler, temp_docs_dir):
         """Test that non-.md files are not processed."""
         txt_file = temp_docs_dir / "test.txt"
         txt_file.touch()
 
-        assert handler._should_process(txt_file) is False
+        assert handler._should_process_file(txt_file) is False
 
     def test_should_process_file_outside_docs_dir(self, handler):
         """Test that files outside docs directory are not processed."""
@@ -68,7 +68,7 @@ class TestMarkdownFileEventHandler:
             outside_file = Path(other_dir) / "outside.md"
             outside_file.touch()
 
-            assert handler._should_process(outside_file) is False
+            assert handler._should_process_file(outside_file) is False
 
     def test_should_process_debounce_logic(self, handler, temp_docs_dir):
         """Test debounce logic prevents rapid successive events."""
@@ -76,14 +76,14 @@ class TestMarkdownFileEventHandler:
         md_file.touch()
 
         # First call should return True
-        assert handler._should_process(md_file) is True
+        assert handler._should_process_file(md_file) is True
 
         # Immediate second call should return False (debounced)
-        assert handler._should_process(md_file) is False
+        assert handler._should_process_file(md_file) is False
 
         # Wait for debounce interval and try again
         time.sleep(0.2)  # Longer than debounce_interval of 0.1
-        assert handler._should_process(md_file) is True
+        assert handler._should_process_file(md_file) is True
 
     def test_should_process_thread_safety(self, handler, temp_docs_dir):
         """Test that debounce logic is thread-safe."""
@@ -93,7 +93,7 @@ class TestMarkdownFileEventHandler:
         results = []
 
         def check_process():
-            result = handler._should_process(md_file)
+            result = handler._should_process_file(md_file)
             results.append(result)
 
         # Create multiple threads checking simultaneously
@@ -108,6 +108,36 @@ class TestMarkdownFileEventHandler:
         # Only one should return True, others should be debounced
         true_count = sum(results)
         assert true_count == 1
+
+    def test_should_process_valid_folder(self, handler, temp_docs_dir):
+        """Test that valid folders are processed."""
+        folder = temp_docs_dir / "test_folder"
+        folder.mkdir()
+
+        assert handler._should_process_folder(folder) is True
+
+    def test_should_process_folder_outside_docs_dir(self, handler):
+        """Test that folders outside docs directory are not processed."""
+        # Create a folder in a different temp directory
+        with tempfile.TemporaryDirectory() as other_dir:
+            outside_folder = Path(other_dir) / "outside_folder"
+            outside_folder.mkdir()
+
+            assert handler._should_process_folder(outside_folder) is False
+
+    def test_should_process_hidden_folder(self, handler, temp_docs_dir):
+        """Test that hidden folders are not processed."""
+        hidden_folder = temp_docs_dir / ".hidden"
+        hidden_folder.mkdir()
+
+        assert handler._should_process_folder(hidden_folder) is False
+
+    def test_should_process_system_folder(self, handler, temp_docs_dir):
+        """Test that system folders are not processed."""
+        system_folder = temp_docs_dir / "__pycache__"
+        system_folder.mkdir()
+
+        assert handler._should_process_folder(system_folder) is False
 
     def test_on_created_md_file(self, handler, temp_docs_dir, mock_callback):
         """Test handling of .md file creation."""
@@ -126,15 +156,22 @@ class TestMarkdownFileEventHandler:
         assert sync_event.event_type == "created"
         assert sync_event.file_path == md_file.resolve()
 
-    def test_on_created_directory(self, handler, mock_callback):
-        """Test that directory creation is ignored."""
+    def test_on_created_directory(self, handler, temp_docs_dir, mock_callback):
+        """Test that directory creation triggers folder_created event."""
+        test_dir = temp_docs_dir / "test_directory"
+        test_dir.mkdir()
+
         event = Mock()
         event.is_directory = True
-        event.src_path = "/some/directory"
+        event.src_path = str(test_dir)
 
         handler.on_created(event)
 
-        mock_callback.assert_not_called()
+        mock_callback.assert_called_once()
+        call_args = mock_callback.call_args[0]
+        sync_event = call_args[0]
+        assert sync_event.event_type == "folder_created"
+        assert sync_event.file_path == test_dir.resolve()
 
     def test_on_created_non_md_file(self, handler, temp_docs_dir, mock_callback):
         """Test that non-.md file creation is ignored."""
@@ -205,15 +242,74 @@ class TestMarkdownFileEventHandler:
 
         mock_callback.assert_not_called()
 
-    def test_on_deleted_directory(self, handler, mock_callback):
-        """Test that directory deletion is ignored."""
+    def test_on_deleted_directory(self, handler, temp_docs_dir, mock_callback):
+        """Test that directory deletion triggers folder_deleted event."""
+        test_dir = temp_docs_dir / "test_directory"
+
         event = Mock()
         event.is_directory = True
-        event.src_path = "/some/directory"
+        event.src_path = str(test_dir)
 
         handler.on_deleted(event)
 
-        mock_callback.assert_not_called()
+        mock_callback.assert_called_once()
+        call_args = mock_callback.call_args[0]
+        sync_event = call_args[0]
+        assert sync_event.event_type == "folder_deleted"
+        assert sync_event.file_path == test_dir.resolve()
+
+    def test_on_moved_md_file(self, handler, temp_docs_dir, mock_callback):
+        """Test handling of .md file move/rename."""
+        old_file = temp_docs_dir / "old.md"
+        new_file = temp_docs_dir / "new.md"
+        old_file.touch()
+
+        event = Mock()
+        event.is_directory = False
+        event.src_path = str(old_file)
+        event.dest_path = str(new_file)
+
+        handler.on_moved(event)
+
+        # Should trigger two events: delete + create
+        assert mock_callback.call_count == 2
+
+        # First call should be delete
+        first_call = mock_callback.call_args_list[0][0][0]
+        assert first_call.event_type == "deleted"
+        assert first_call.file_path == old_file.resolve()
+
+        # Second call should be create
+        second_call = mock_callback.call_args_list[1][0][0]
+        assert second_call.event_type == "created"
+        assert second_call.file_path == new_file.resolve()
+
+    def test_on_moved_directory(self, handler, temp_docs_dir, mock_callback):
+        """Test handling of directory move/rename."""
+        old_dir = temp_docs_dir / "old_dir"
+        new_dir = temp_docs_dir / "new_dir"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        event = Mock()
+        event.is_directory = True
+        event.src_path = str(old_dir)
+        event.dest_path = str(new_dir)
+
+        handler.on_moved(event)
+
+        # Should trigger two events: folder_deleted + folder_created
+        assert mock_callback.call_count == 2
+
+        # First call should be folder_deleted
+        first_call = mock_callback.call_args_list[0][0][0]
+        assert first_call.event_type == "folder_deleted"
+        assert first_call.file_path == old_dir.resolve()
+
+        # Second call should be folder_created
+        second_call = mock_callback.call_args_list[1][0][0]
+        assert second_call.event_type == "folder_created"
+        assert second_call.file_path == new_dir.resolve()
 
 
 class TestFileMonitor:

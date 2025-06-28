@@ -135,7 +135,7 @@ class SyncEngine:
             )
 
             page_id = self.state.get_page_id(str(file_path))
-            title = file_path.stem.replace("_", " ").replace("-", " ").title()
+            title = self._get_title_from_path(file_path)
             parent_id = self._get_parent_page_id(rel_path)
 
             # Create or update the page first
@@ -187,6 +187,35 @@ class SyncEngine:
             else:
                 logger.warning(f"No page mapping found for deleted file: {file_path}")
 
+        elif event.event_type == "folder_created":
+            if not file_path.exists():
+                logger.warning(f"Folder not found: {file_path}")
+                return
+
+            page_id = self.state.get_page_id(str(file_path))
+            if page_id:
+                logger.info(f"Folder page already exists: {file_path}")
+                return
+
+            # Generate folder page content
+            folder_content = self._generate_folder_page_content(file_path)
+            title = self._get_title_from_path(file_path)
+            parent_id = self._get_parent_page_id(rel_path)
+
+            # Create folder page
+            page = self.confluence.create_page(
+                title=title,
+                body=folder_content,
+                parent_id=parent_id,
+            )
+            page_id = page["id"]
+            logger.info(f"Created folder page for {file_path} with ID {page_id}")
+            self.state.add_mapping(str(file_path), page_id, time.time())
+
+        elif event.event_type == "folder_deleted":
+            # Handle folder deletion with recursive child deletion
+            self._delete_folder_and_children(file_path)
+
     def _get_parent_page_id(self: "SyncEngine", rel_path: Path) -> Optional[str]:
         """Get the parent page ID for a file.
 
@@ -232,11 +261,130 @@ class SyncEngine:
 
         return uploaded_attachments
 
+    def _get_title_from_path(self: "SyncEngine", path: Path) -> str:
+        """Convert a file or folder path to a Confluence page title.
+
+        Args:
+            path: The file or folder path
+
+        Returns:
+            A formatted title for the Confluence page
+        """
+        if path.is_file():
+            # For files, use the stem (filename without extension)
+            name = path.stem
+        else:
+            # For folders, use the folder name
+            name = path.name
+
+        # Apply title conversion: replace underscores and hyphens with spaces, then title case
+        return name.replace("_", " ").replace("-", " ").title()
+
+    def _generate_folder_page_content(self: "SyncEngine", folder_path: Path) -> str:
+        """Generate content for a folder page.
+
+        Args:
+            folder_path: The folder path
+
+        Returns:
+            XHTML content for the folder page
+        """
+        folder_name = self._get_title_from_path(folder_path)
+
+        # Simple folder page template
+        template = f"""<h1>{folder_name}</h1>
+<p>This page represents the <strong>{folder_name}</strong> section of the documentation.</p>
+<p>The following sub-pages and sections are available:</p>
+<h2>Contents</h2>
+<p><em>Sub-pages will appear here automatically as files and folders are added.</em></p>
+<h2>Sub-pages</h2>
+<ac:structured-macro ac:name="children">
+  <ac:parameter ac:name="all">true</ac:parameter>
+  <ac:parameter ac:name="sort">title</ac:parameter>
+</ac:structured-macro>"""
+
+        return template
+
+    def _delete_folder_and_children(self: "SyncEngine", folder_path: Path) -> None:
+        """Delete a folder page and all its child pages recursively.
+
+        Args:
+            folder_path: The folder path to delete
+        """
+        # Get all mappings that are children of this folder
+        folder_str = str(folder_path)
+        children_to_delete = []
+
+        # Find all paths that start with this folder path
+        for mapped_path in self.state.get_all_tracked_files():
+            mapped_path_obj = Path(mapped_path)
+            try:
+                # Check if this path is under the folder being deleted
+                mapped_path_obj.relative_to(folder_path)
+                children_to_delete.append(mapped_path)
+            except ValueError:
+                # Not a child of this folder
+                continue
+
+        # Sort by depth (deepest first) to ensure children are deleted before parents
+        children_to_delete.sort(key=lambda p: len(Path(p).parts), reverse=True)
+
+        # Delete all children first
+        for child_path in children_to_delete:
+            if child_path != folder_str:  # Don't delete the folder itself yet
+                page_id = self.state.get_page_id(child_path)
+                if page_id:
+                    try:
+                        self.confluence.delete_page(page_id)
+                        self.state.remove_mapping(child_path)
+                        logger.info(f"Deleted child page for {child_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete child page {child_path}: {e}")
+
+        # Finally, delete the folder page itself
+        page_id = self.state.get_page_id(folder_str)
+        if page_id:
+            try:
+                self.confluence.delete_page(page_id)
+                self.state.remove_mapping(folder_str)
+                logger.info(f"Deleted folder page for {folder_path}")
+            except Exception as e:
+                logger.error(f"Failed to delete folder page {folder_path}: {e}")
+        else:
+            logger.warning(f"No page mapping found for deleted folder: {folder_path}")
+
     def initial_scan(self: "SyncEngine") -> None:
         """
-        Scan docs_dir for .md files
-        and enqueue 'created' events for untracked files.
+        Scan docs_dir for .md files and folders
+        and enqueue 'created'/'folder_created' events for untracked items.
         """
+        # First, scan for folders (process in hierarchical order - parents first)
+        all_dirs = []
+        for item in self.docs_dir.rglob("*"):
+            if item.is_dir():
+                # Skip hidden and system directories
+                if any(part.startswith(".") for part in item.parts):
+                    continue
+                skip_folders = {
+                    "__pycache__",
+                    ".git",
+                    ".vscode",
+                    ".idea",
+                    "node_modules",
+                    ".pytest_cache",
+                }
+                if any(part in skip_folders for part in item.parts):
+                    continue
+                all_dirs.append(item)
+
+        # Sort by depth (parents first) to ensure proper hierarchy
+        all_dirs.sort(key=lambda p: len(p.parts))
+
+        for dir_path in all_dirs:
+            if not self.state.get_page_id(str(dir_path)):
+                self.enqueue_event(SyncEvent("folder_created", dir_path))
+
+        # Then, scan for markdown files
         for file_path in self.docs_dir.rglob("*.md"):
             if not self.state.get_page_id(str(file_path)):
                 self.enqueue_event(SyncEvent("created", file_path))
