@@ -60,3 +60,5 @@ config.json
 tasks-list.md
 .cursor
 .cursor/*
+# Ignore cursor rules
+.cursor/rules/*
