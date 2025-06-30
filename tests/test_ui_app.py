@@ -17,11 +17,16 @@ class TestLogWidget:
 
     def test_log_widget_initialization(self):
         """Test LogWidget initialization."""
-        widget = LogWidget(max_lines=500)
 
-        assert widget.max_lines == 500
-        assert widget.session_start_time is None
-        assert widget.last_file_size == 0
+        # Mock the log file path to prevent reading real log files
+        with patch("src.ui.app.Path") as mock_path:
+            mock_path.return_value.exists.return_value = False
+
+            widget = LogWidget(max_lines=500)
+
+            assert widget.max_lines == 500
+            assert widget.session_start_time is None
+            assert widget.last_file_size == 0
 
     def test_add_log_message(self):
         """Test adding log messages to widget."""
@@ -157,29 +162,31 @@ class TestLogWidget:
     @pytest.mark.asyncio
     async def test_refresh_logs_with_file(self):
         """Test refreshing logs with existing log file."""
+
         with tempfile.TemporaryDirectory() as temp_dir:
             log_file = Path(temp_dir) / "md_to_confluence.log"
 
-            # Create log file with content
-            log_content = "2024-01-01 10:00:00 - INFO - Test message\n"
+            # Create log file with content in the correct format
+            log_content = "2024-01-01 10:00:00 - test - INFO - Test message\n"
             log_file.write_text(log_content)
 
-            widget = LogWidget()
-
-            # Mock the log file path
+            # Mock the Path to point to our temporary file
             with patch("src.ui.app.Path") as mock_path:
                 mock_path.return_value = log_file
                 mock_path.side_effect = lambda x: (
                     Path(x) if x != "logs/md_to_confluence.log" else log_file
                 )
 
+                widget = LogWidget()
+                # Set session_start_time to None so all logs are included
+                widget.session_start_time = None
                 # Mock write method to track calls
                 widget.write = Mock()
 
                 await widget.refresh_logs()
 
-                # Should have called write with log content
-                widget.write.assert_called()
+                # Should have called write at least once
+                assert widget.write.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_refresh_logs_file_truncated(self):
@@ -233,17 +240,20 @@ class TestLogWidget:
 
     def test_find_session_start_no_file(self):
         """Test finding session start when no log file exists."""
-        widget = LogWidget()
+        from unittest.mock import patch
 
         with patch("src.ui.app.Path") as mock_path:
             mock_path.return_value.exists.return_value = False
 
+            widget = LogWidget()
             widget._find_session_start()
 
             assert widget.session_start_time is None
 
     def test_find_session_start_with_session_marker(self):
         """Test finding session start with session marker in log."""
+        from unittest.mock import patch
+
         with tempfile.TemporaryDirectory() as temp_dir:
             log_file = Path(temp_dir) / "md_to_confluence.log"
             log_content = (
@@ -251,14 +261,13 @@ class TestLogWidget:
             )
             log_file.write_text(log_content)
 
-            widget = LogWidget()
-
             with patch("src.ui.app.Path") as mock_path:
                 mock_path.return_value = log_file
                 mock_path.side_effect = lambda x: (
                     Path(x) if x != "logs/md_to_confluence.log" else log_file
                 )
 
+                widget = LogWidget()
                 widget._find_session_start()
 
                 assert widget.session_start_time is not None

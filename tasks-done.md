@@ -210,6 +210,18 @@
     - [x] Added proper Text object conversion for RichLog widget compatibility
     - [x] Added error handling and fallback to plain text if markup parsing fails
     - [x] Updated tests to work with Rich Text object integration
+  - [x] __FIXED__: Duplicate log output in TUI mode
+    - [x] Added enable_console parameter to setup_logging() function
+    - [x] TUI mode now uses enable_console=False to prevent stderr interference
+    - [x] Eliminated duplicate logs showing at top of screen and in LogWidget
+    - [x] Console colors still available for CLI usage (enable_console=True)
+    - [x] Added comprehensive tests for both TUI and console logging modes
+  - [x] __FIXED__: LogWidget test isolation issues
+    - [x] Fixed test_log_widget_initialization by mocking Path during widget creation
+    - [x] Fixed test_refresh_logs_with_file by proper session handling and mocking
+    - [x] Fixed test_find_session_start_no_file by mocking Path before widget creation
+    - [x] Ensured all LogWidget tests properly isolate from real filesystem
+    - [x] All 39 UI tests now passing with proper test isolation
   - [x] Add file status table
   - [x] Add keyboard shortcuts (q=quit, ctrl+c=clear logs, ctrl+s=scan conflicts)
   - [x] Add CSS styling

@@ -89,12 +89,15 @@ OPTIONAL_CONFIG_KEYS = {
 }
 
 
-def setup_logging(level: int = logging.INFO, logs_dir: Optional[Path] = None) -> None:
+def setup_logging(
+    level: int = logging.INFO, logs_dir: Optional[Path] = None, enable_console: bool = True
+) -> None:
     """Set up logging configuration for the application.
 
     Args:
         level: The logging level to use. Defaults to logging.INFO.
         logs_dir: Optional logs directory. Defaults to global LOGS_DIR.
+        enable_console: Whether to enable console output. Set to False for TUI mode.
     """
     target_logs_dir = logs_dir if logs_dir is not None else LOGS_DIR
     target_logs_dir.mkdir(exist_ok=True)
@@ -110,11 +113,6 @@ def setup_logging(level: int = logging.INFO, logs_dir: Optional[Path] = None) ->
     file_formatter = logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT)
     file_handler.setFormatter(file_formatter)
 
-    # Console handler with colors
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_formatter = ColoredFormatter(LOG_FORMAT, LOG_DATE_FORMAT)
-    console_handler.setFormatter(console_formatter)
-
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
@@ -123,9 +121,15 @@ def setup_logging(level: int = logging.INFO, logs_dir: Optional[Path] = None) ->
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    # Add both handlers
+    # Always add file handler
     root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+
+    # Conditionally add console handler (not needed in TUI mode)
+    if enable_console:
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_formatter = ColoredFormatter(LOG_FORMAT, LOG_DATE_FORMAT)
+        console_handler.setFormatter(console_formatter)
+        root_logger.addHandler(console_handler)
 
     session_start = datetime.now().strftime(LOG_DATE_FORMAT)
     logging.info("=" * 80)

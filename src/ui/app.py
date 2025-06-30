@@ -343,8 +343,8 @@ if __name__ == "__main__":
 
     logger = logging.getLogger(__name__)
     try:
-        # Setup logging first
-        setup_logging()
+        # Setup logging first (disable console output for TUI mode)
+        setup_logging(enable_console=False)
 
         logger.info("Starting MDToConfluenceApp...")
         config = load_config(CONFIG_PATH)

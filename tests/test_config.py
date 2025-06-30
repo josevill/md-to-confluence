@@ -46,7 +46,9 @@ class TestLoggingSetup:
         # Check root logger configuration
         root_logger = logging.getLogger()
         assert root_logger.level == logging.INFO
-        assert len(root_logger.handlers) == 2  # File + Console handlers
+        assert (
+            len(root_logger.handlers) == 2
+        )  # File + Console handlers (default enable_console=True)
 
         # Check file handler
         file_handler = None
@@ -98,6 +100,22 @@ class TestLoggingSetup:
         handler_types = [type(h).__name__ for h in root_logger.handlers]
         assert "RotatingFileHandler" in handler_types
         assert "StreamHandler" in handler_types
+
+    def test_setup_logging_tui_mode(self, tmp_path):
+        """Test logging setup for TUI mode (no console output)."""
+        logs_dir = tmp_path / "logs"
+        setup_logging(logs_dir=logs_dir, enable_console=False)
+
+        # Check root logger configuration
+        root_logger = logging.getLogger()
+        assert root_logger.level == logging.INFO
+        assert len(root_logger.handlers) == 1  # Only file handler in TUI mode
+
+        # Check that only file handler exists
+        handler = root_logger.handlers[0]
+        assert isinstance(handler, logging.handlers.RotatingFileHandler)
+        assert handler.maxBytes == LOG_MAX_BYTES
+        assert handler.backupCount == LOG_BACKUP_COUNT
 
     def test_colored_formatter_functionality(self):
         """Test that ColoredFormatter works correctly."""
