@@ -9,7 +9,9 @@ alwaysApply: true
 - If you need to validate that a code is ready to be shipped after implementing any new feature, create a commit to the master branch in the local Git repo, this will trigger pre-commit and let you know if anything is wrong.
 - If a file is bigger than 400 lines, split it.
 - Keep the @tasks-list.md file up-to-date with whatever you do, also keep track of possible improvements
+- When tasks are completed (marked with [x]), move them from tasks-list.md to tasks-done.md to keep the main task file clean and readable for LLMs. Only incomplete tasks (marked with [ ]) should remain in tasks-list.md
 - Keep your explanations short, no need to over elaborate over things unless it is something complex that needs the data to be shown and mentioned. NO EMOJIS!
 - Always implement a test for a feature first, run the test (it must fail), then implement the feature and run the test again (it MUST pass).
 - Before suggesting something is complete, review the tests for such feature/bugfix and check that all tests pass.
+- Do not leave unnecesary logic comments unless you consider the logic to be incredibly complex and reading the code won't be enough to understand it.
 - If this is a new chat/session, always check for the above rules.
