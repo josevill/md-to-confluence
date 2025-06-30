@@ -46,12 +46,21 @@ class TestLoggingSetup:
         # Check root logger configuration
         root_logger = logging.getLogger()
         assert root_logger.level == logging.INFO
-        assert len(root_logger.handlers) == 1
+        assert len(root_logger.handlers) == 2  # File + Console handlers
 
-        handler = root_logger.handlers[0]
-        assert isinstance(handler, logging.handlers.RotatingFileHandler)
-        assert handler.maxBytes == LOG_MAX_BYTES
-        assert handler.backupCount == LOG_BACKUP_COUNT
+        # Check file handler
+        file_handler = None
+        console_handler = None
+        for handler in root_logger.handlers:
+            if isinstance(handler, logging.handlers.RotatingFileHandler):
+                file_handler = handler
+            elif isinstance(handler, logging.StreamHandler):
+                console_handler = handler
+
+        assert file_handler is not None
+        assert console_handler is not None
+        assert file_handler.maxBytes == LOG_MAX_BYTES
+        assert file_handler.backupCount == LOG_BACKUP_COUNT
 
     def test_setup_logging_custom_level(self, tmp_path):
         """Test logging setup with custom level."""
@@ -81,9 +90,79 @@ class TestLoggingSetup:
         logs_dir = tmp_path / "logs"
         setup_logging(logs_dir=logs_dir)
 
-        # Should only have the new file handler
-        assert len(root_logger.handlers) == 1
+        # Should have the new file and console handlers (old handler replaced)
+        assert len(root_logger.handlers) == 2  # File + Console handlers
         assert old_handler not in root_logger.handlers
+
+        # Verify we have the correct handler types
+        handler_types = [type(h).__name__ for h in root_logger.handlers]
+        assert "RotatingFileHandler" in handler_types
+        assert "StreamHandler" in handler_types
+
+    def test_colored_formatter_functionality(self):
+        """Test that ColoredFormatter works correctly."""
+        from src.config import ColoredFormatter
+
+        formatter = ColoredFormatter(LOG_FORMAT, LOG_DATE_FORMAT)
+
+        # Create test log records
+        warning_record = logging.LogRecord(
+            name="test",
+            level=logging.WARNING,
+            pathname="",
+            lineno=0,
+            msg="Test warning message",
+            args=(),
+            exc_info=None,
+        )
+        warning_record.created = 1640995200.0  # Fixed timestamp for consistent testing
+
+        error_record = logging.LogRecord(
+            name="test",
+            level=logging.ERROR,
+            pathname="",
+            lineno=0,
+            msg="Test error message",
+            args=(),
+            exc_info=None,
+        )
+        error_record.created = 1640995200.0
+
+        critical_record = logging.LogRecord(
+            name="test",
+            level=logging.CRITICAL,
+            pathname="",
+            lineno=0,
+            msg="Test critical message",
+            args=(),
+            exc_info=None,
+        )
+        critical_record.created = 1640995200.0
+
+        # Test formatting - when not in terminal, should not have color codes
+        warning_output = formatter.format(warning_record)
+        error_output = formatter.format(error_record)
+        critical_output = formatter.format(critical_record)
+
+        # Verify the messages contain the expected content
+        assert "WARNING" in warning_output
+        assert "Test warning message" in warning_output
+        assert "ERROR" in error_output
+        assert "Test error message" in error_output
+        assert "CRITICAL" in critical_output
+        assert "Test critical message" in critical_output
+
+    def test_log_colors_utility(self):
+        """Test LogColors utility class."""
+        from src.config import LogColors
+
+        # Test colorize method
+        test_text = "Test message"
+        colored = LogColors.colorize(test_text, LogColors.RED)
+
+        assert colored.startswith(LogColors.RED)
+        assert colored.endswith(LogColors.RESET)
+        assert test_text in colored
 
 
 class TestOnePasswordIntegration:

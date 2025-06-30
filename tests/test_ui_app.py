@@ -32,6 +32,79 @@ class TestLogWidget:
         # Check that message was added (write method called)
         # Note: Can't easily verify content without rendering
 
+    def test_colorize_log_line_warning(self):
+        """Test colorizing WARNING log lines with Rich markup."""
+        widget = LogWidget()
+
+        log_line = "2024-01-01 10:00:00 - test.module - WARNING - This is a test warning"
+        colored = widget._colorize_log_line(log_line)
+
+        # Should contain Rich markup for yellow/orange styling
+        assert "[bold yellow]" in colored
+        assert "[yellow]" in colored
+        assert "WARNING" in colored
+        assert "This is a test warning" in colored
+
+    def test_colorize_log_line_error(self):
+        """Test colorizing ERROR log lines with Rich markup."""
+        widget = LogWidget()
+
+        log_line = "2024-01-01 10:00:00 - test.module - ERROR - This is a test error"
+        colored = widget._colorize_log_line(log_line)
+
+        # Should contain Rich markup for red styling
+        assert "[bold red]" in colored
+        assert "[red]" in colored
+        assert "ERROR" in colored
+        assert "This is a test error" in colored
+
+    def test_colorize_log_line_critical(self):
+        """Test colorizing CRITICAL log lines with Rich markup."""
+        widget = LogWidget()
+
+        log_line = "2024-01-01 10:00:00 - test.module - CRITICAL - This is critical"
+        colored = widget._colorize_log_line(log_line)
+
+        # Should contain Rich markup for bold red styling
+        assert "[bold red]" in colored
+        assert "CRITICAL" in colored
+        assert "This is critical" in colored
+
+    def test_colorize_log_line_info(self):
+        """Test colorizing INFO log lines with Rich markup."""
+        widget = LogWidget()
+
+        log_line = "2024-01-01 10:00:00 - test.module - INFO - This is info"
+        colored = widget._colorize_log_line(log_line)
+
+        # Should contain Rich markup for green styling
+        assert "[bold green]" in colored
+        assert "INFO" in colored
+        assert "This is info" in colored
+
+    def test_colorize_log_line_debug(self):
+        """Test colorizing DEBUG log lines with Rich markup."""
+        widget = LogWidget()
+
+        log_line = "2024-01-01 10:00:00 - test.module - DEBUG - This is debug"
+        colored = widget._colorize_log_line(log_line)
+
+        # Should contain Rich markup for blue styling
+        assert "[bold blue]" in colored
+        assert "[dim]" in colored
+        assert "DEBUG" in colored
+        assert "This is debug" in colored
+
+    def test_colorize_log_line_invalid_format(self):
+        """Test colorizing log lines that don't match expected format."""
+        widget = LogWidget()
+
+        invalid_line = "This is not a proper log line"
+        colored = widget._colorize_log_line(invalid_line)
+
+        # Should return unchanged if format doesn't match
+        assert colored == invalid_line
+
     def test_is_current_session_no_session_time(self):
         """Test session checking when no session time is set."""
         widget = LogWidget()
