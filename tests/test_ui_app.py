@@ -243,8 +243,8 @@ class TestMDToConfluenceApp:
             # Should add columns to data table
             app.data_table.add_columns.assert_called_once_with("File", "Status")
 
-            # Should set up intervals
-            assert app.set_interval.call_count == 2
+            # Should set up intervals (file status, log refresh, conflict summary)
+            assert app.set_interval.call_count == 3
 
     @pytest.mark.asyncio
     async def test_refresh_file_statuses(self, app):

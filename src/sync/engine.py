@@ -9,6 +9,12 @@ from typing import Any, Dict, Optional
 
 from src.confluence.client import ConfluenceClient
 from src.confluence.converter import MarkdownConverter
+from src.sync.conflict_detector import (
+    ConflictDetector,
+    ConflictInfo,
+    ConflictResolutionStrategy,
+    ConflictType,
+)
 from src.sync.state import SyncState
 
 logger = logging.getLogger(__name__)
@@ -49,6 +55,7 @@ class SyncEngine:
         confluence_client: ConfluenceClient,
         converter: MarkdownConverter,
         debounce_interval: float = 1.0,
+        conflict_strategy: ConflictResolutionStrategy = ConflictResolutionStrategy.SKIP,
     ) -> None:
         """Initialize the SyncEngine."""
         if SyncEngine._instance is not None:
@@ -58,6 +65,7 @@ class SyncEngine:
         self.confluence = confluence_client
         self.converter = converter
         self.debounce_interval = debounce_interval
+        self.conflict_detector = ConflictDetector(default_strategy=conflict_strategy)
         self.event_queue = Queue()
         self._stop_event = threading.Event()
         self._worker_thread = threading.Thread(target=self._worker, daemon=True)
@@ -114,107 +122,127 @@ class SyncEngine:
             return None
 
     def _process_event(self: "SyncEngine", event: SyncEvent) -> None:
-        """Process the event."""
+        """Process a single sync event."""
         logger.info(f"Processing event: {event}")
-        file_path = event.file_path
+        file_path = event.file_path.resolve()  # Ensure consistent path resolution
 
-        # Get relative path and validate it's under docs_dir
-        rel_path = self._get_relative_path(file_path)
-        if rel_path is None:
-            return
-
-        if event.event_type == "created" or event.event_type == "modified":
-            if not file_path.exists():
-                logger.warning(f"File not found: {file_path}")
+        try:
+            # Get relative path and validate it's under docs_dir
+            rel_path = self._get_relative_path(file_path)
+            if rel_path is None:
                 return
 
-            # Convert markdown to Confluence storage format with image extraction
-            content = file_path.read_text(encoding="utf-8")
-            storage_format, local_images = self.converter.convert_with_images(
-                content, base_path=file_path.parent
-            )
+            if event.event_type == "created" or event.event_type == "modified":
+                if not file_path.exists():
+                    logger.warning(f"File not found: {file_path}")
+                    return
 
-            page_id = self.state.get_page_id(str(file_path))
-            title = self._get_title_from_path(file_path)
-            parent_id = self._get_parent_page_id(rel_path)
-
-            # Create or update the page first
-            if page_id:
-                # Update existing page with placeholder content
-                self.confluence.update_page(
-                    page_id=page_id,
-                    title=title,
-                    body=storage_format,
+                # Convert markdown to Confluence storage format with image extraction
+                content = file_path.read_text(encoding="utf-8")
+                storage_format, local_images = self.converter.convert_with_images(
+                    content, base_path=file_path.parent
                 )
-                logger.info(f"Updated page for {file_path}")
-            else:
-                # Create new page with placeholder content
+
+                page_id = self.state.get_page_id(str(file_path))
+                title = self._get_title_from_path(file_path)
+                parent_id = self._get_parent_page_id(rel_path)
+
+                # Check for conflicts before creating new pages
+                if not page_id:
+                    resolved_title = self._check_and_resolve_conflicts(title, file_path)
+                    if resolved_title is None:
+                        logger.warning(f"Skipping page creation due to conflict: {title}")
+                        return
+                    title = resolved_title
+
+                # Create or update the page first
+                if page_id:
+                    # Update existing page with placeholder content
+                    self.confluence.update_page(
+                        page_id=page_id,
+                        title=title,
+                        body=storage_format,
+                    )
+                    logger.info(f"Updated page for {file_path}")
+                else:
+                    # Create new page with placeholder content
+                    page = self.confluence.create_page(
+                        title=title,
+                        body=storage_format,
+                        parent_id=parent_id,
+                    )
+                    page_id = page["id"]
+                    logger.info(f"Created page for {file_path} with ID {page_id}")
+                    self.state.add_mapping(str(file_path), page_id, time.time())
+
+                # Upload images and update content if there are local images
+                if local_images:
+                    uploaded_attachments = self._upload_images(page_id, local_images)
+
+                    # Finalize content with image macros
+                    final_content = self.converter.finalize_content_with_images(
+                        storage_format, local_images, uploaded_attachments
+                    )
+
+                    # Update page with final content including image macros
+                    self.confluence.update_page(
+                        page_id=page_id,
+                        title=title,
+                        body=final_content,
+                    )
+                    logger.info(f"Updated page content with {len(uploaded_attachments)} images")
+
+                # Update state with current timestamp
+                self.state.add_mapping(str(file_path), page_id, time.time())
+
+            elif event.event_type == "deleted":
+                page_id = self.state.get_page_id(str(file_path))
+                if page_id:
+                    self.confluence.delete_page(page_id)
+                    self.state.remove_mapping(str(file_path))
+                    logger.info(f"Deleted page for {file_path}")
+                else:
+                    logger.warning(f"No page mapping found for deleted file: {file_path}")
+
+            elif event.event_type == "folder_created":
+                if not file_path.exists():
+                    logger.warning(f"Folder not found: {file_path}")
+                    return
+
+                page_id = self.state.get_page_id(str(file_path))
+                if page_id:
+                    logger.info(f"Folder page already exists: {file_path}")
+                    return
+
+                # Generate folder page content
+                folder_content = self._generate_folder_page_content(file_path)
+                title = self._get_title_from_path(file_path)
+                parent_id = self._get_parent_page_id(rel_path)
+
+                # Check for conflicts before creating folder page
+                resolved_title = self._check_and_resolve_conflicts(title, file_path)
+                if resolved_title is None:
+                    logger.warning(f"Skipping folder page creation due to conflict: {title}")
+                    return
+                title = resolved_title
+
+                # Create folder page
                 page = self.confluence.create_page(
                     title=title,
-                    body=storage_format,
+                    body=folder_content,
                     parent_id=parent_id,
                 )
                 page_id = page["id"]
-                logger.info(f"Created page for {file_path} with ID {page_id}")
+                logger.info(f"Created folder page for {file_path} with ID {page_id}")
                 self.state.add_mapping(str(file_path), page_id, time.time())
 
-            # Upload images and update content if there are local images
-            if local_images:
-                uploaded_attachments = self._upload_images(page_id, local_images)
+            elif event.event_type == "folder_deleted":
+                # Handle folder deletion with recursive child deletion
+                self._delete_folder_and_children(file_path)
 
-                # Finalize content with image macros
-                final_content = self.converter.finalize_content_with_images(
-                    storage_format, local_images, uploaded_attachments
-                )
-
-                # Update page with final content including image macros
-                self.confluence.update_page(
-                    page_id=page_id,
-                    title=title,
-                    body=final_content,
-                )
-                logger.info(f"Updated page content with {len(uploaded_attachments)} images")
-
-            # Update state with current timestamp
-            self.state.add_mapping(str(file_path), page_id, time.time())
-
-        elif event.event_type == "deleted":
-            page_id = self.state.get_page_id(str(file_path))
-            if page_id:
-                self.confluence.delete_page(page_id)
-                self.state.remove_mapping(str(file_path))
-                logger.info(f"Deleted page for {file_path}")
-            else:
-                logger.warning(f"No page mapping found for deleted file: {file_path}")
-
-        elif event.event_type == "folder_created":
-            if not file_path.exists():
-                logger.warning(f"Folder not found: {file_path}")
-                return
-
-            page_id = self.state.get_page_id(str(file_path))
-            if page_id:
-                logger.info(f"Folder page already exists: {file_path}")
-                return
-
-            # Generate folder page content
-            folder_content = self._generate_folder_page_content(file_path)
-            title = self._get_title_from_path(file_path)
-            parent_id = self._get_parent_page_id(rel_path)
-
-            # Create folder page
-            page = self.confluence.create_page(
-                title=title,
-                body=folder_content,
-                parent_id=parent_id,
-            )
-            page_id = page["id"]
-            logger.info(f"Created folder page for {file_path} with ID {page_id}")
-            self.state.add_mapping(str(file_path), page_id, time.time())
-
-        elif event.event_type == "folder_deleted":
-            # Handle folder deletion with recursive child deletion
-            self._delete_folder_and_children(file_path)
+        except Exception as e:
+            logger.error(f"Error processing event {event}: {e}")
+            # Don't re-raise the exception to allow the sync engine to continue
 
     def _get_parent_page_id(self: "SyncEngine", rel_path: Path) -> Optional[str]:
         """Get the parent page ID for a file.
@@ -388,6 +416,109 @@ class SyncEngine:
         for file_path in self.docs_dir.rglob("*.md"):
             if not self.state.get_page_id(str(file_path)):
                 self.enqueue_event(SyncEvent("created", file_path))
+
+    def _check_and_resolve_conflicts(
+        self: "SyncEngine", title: str, file_path: Path
+    ) -> Optional[str]:
+        """Check for title conflicts and resolve them.
+
+        Args:
+            title: Proposed page title
+            file_path: Local file path
+
+        Returns:
+            Resolved title or None if page should be skipped
+        """
+        try:
+            # Check for conflicts with existing pages
+            conflicts = self.confluence.check_title_conflicts([title])
+
+            if not conflicts:
+                return title  # No conflicts, use original title
+
+            # Conflict detected, use conflict detector to resolve
+            conflict_info = ConflictInfo(
+                conflict_type=ConflictType.TITLE_CONFLICT,
+                local_path=file_path,
+                proposed_title=title,
+                existing_page_id=conflicts[title],
+                existing_title=title,
+            )
+
+            resolutions = self.conflict_detector.resolve_conflicts([conflict_info])
+
+            if conflict_info in resolutions:
+                resolved_title = resolutions[conflict_info]
+                logger.info(f"Resolved conflict: '{title!r}' -> '{resolved_title!r}'")
+                return resolved_title
+            else:
+                logger.warning(f"Conflict resolution resulted in skip for: '{title!r}'")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error checking conflicts for '{title!r}': {e}")
+            # On error, default to original title to avoid blocking sync
+            return title
+
+    def scan_for_conflicts(self: "SyncEngine") -> Dict[str, str]:
+        """Scan all untracked files and folders for potential conflicts.
+
+        Returns:
+            Dict mapping conflicting titles to existing page IDs
+        """
+        logger.info("Scanning for potential conflicts...")
+
+        proposed_titles = []
+
+        # Scan for untracked markdown files
+        for file_path in self.docs_dir.rglob("*.md"):
+            if not self.state.get_page_id(str(file_path)):
+                title = self._get_title_from_path(file_path)
+                proposed_titles.append(title)
+
+        # Scan for untracked folders
+        for dir_path in self.docs_dir.rglob("*"):
+            if dir_path.is_dir() and not self.state.get_page_id(str(dir_path)):
+                # Skip hidden and system directories
+                if any(part.startswith(".") for part in dir_path.parts):
+                    continue
+                skip_folders = {
+                    "__pycache__",
+                    ".git",
+                    ".vscode",
+                    ".idea",
+                    "node_modules",
+                    ".pytest_cache",
+                }
+                if any(part in skip_folders for part in dir_path.parts):
+                    continue
+
+                title = self._get_title_from_path(dir_path)
+                proposed_titles.append(title)
+
+        # Check for conflicts (even if empty list for consistency)
+        conflicts = self.confluence.check_title_conflicts(proposed_titles)
+
+        if not proposed_titles:
+            logger.info("No untracked files or folders found")
+            return conflicts
+
+        if conflicts:
+            logger.warning(f"Found {len(conflicts)} potential conflicts:")
+            for title, page_id in conflicts.items():
+                logger.warning(f"  - '{title!r}' conflicts with existing page ID: {page_id}")
+        else:
+            logger.info(f"No conflicts found for {len(proposed_titles)} proposed titles")
+
+        return conflicts
+
+    def get_conflict_summary(self: "SyncEngine") -> Dict[str, int]:
+        """Get summary of detected conflicts.
+
+        Returns:
+            Dict with conflict statistics
+        """
+        return self.conflict_detector.get_conflict_summary()
 
     def stop(self: "SyncEngine") -> None:
         self._stop_event.set()

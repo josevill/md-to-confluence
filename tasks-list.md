@@ -97,10 +97,10 @@
   - [ ] Add release scripts
   - [ ] Create distribution packages (wheel, source)
 - [ ] Set up CI/CD
-  - [ ] Configure GitHub Actions
-  - [ ] Add automated testing pipeline
+  - [x] Configure GitHub Actions
+  - [x] Add automated testing pipeline
   - [ ] Set up automated releases
-  - [ ] Add code quality checks
+  - [x] Add code quality checks
 - [ ] Create installation methods
   - [ ] pip installable package
   - [ ] Docker container

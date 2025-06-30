@@ -473,3 +473,52 @@ class ConfluenceClient:
 
         except Exception as e:
             logger.warning(f"Could not delete existing attachment {filename}: {e}")
+
+    def get_space_page_titles(self: "ConfluenceClient") -> Dict[str, str]:
+        """Get all page titles in the space mapped to their IDs.
+
+        Returns:
+            Dict mapping page titles to page IDs
+        """
+        logger.info(f"Retrieving all page titles in space: {self.space_key}")
+        all_pages = self.list_all_space_pages()
+
+        title_to_id = {}
+        for page in all_pages:
+            title = page.get("title", "")
+            page_id = page.get("id", "")
+            if title and page_id:
+                title_to_id[title] = page_id
+
+        logger.info(f"Found {len(title_to_id)} pages in space '{self.space_key!r}'")
+        return title_to_id
+
+    def check_title_conflicts(self: "ConfluenceClient", titles: list[str]) -> Dict[str, str]:
+        """Check for title conflicts with existing pages in the space.
+
+        Args:
+            titles: List of page titles to check for conflicts
+
+        Returns:
+            Dict mapping conflicting titles to their existing page IDs
+        """
+        logger.info(f"Checking {len(titles)} titles for conflicts in space: {self.space_key}")
+
+        existing_titles = self.get_space_page_titles()
+        conflicts = {}
+
+        for title in titles:
+            if title in existing_titles:
+                conflicts[title] = existing_titles[title]
+                logger.warning(
+                    f"Title conflict detected: '{title!r}' already exists (ID: {existing_titles[title]})"
+                )
+
+        if conflicts:
+            logger.warning(
+                f"Found {len(conflicts)} title conflicts out of {len(titles)} titles checked"
+            )
+        else:
+            logger.info(f"No title conflicts found for {len(titles)} titles")
+
+        return conflicts

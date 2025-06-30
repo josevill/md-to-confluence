@@ -251,8 +251,8 @@ def sanitize_space_key(space_key: str) -> str:
     # Remove whitespace
     space_key = space_key.strip()
 
-    # Confluence space keys should only contain uppercase letters, numbers, and underscores
-    if not re.match(r"^[A-Z0-9_]+$", space_key):
+    # Confluence space keys should only contain uppercase letters, numbers, the curly tilde and underscores
+    if not re.match(r"^[A-Z0-9_~]+$", space_key):
         raise ValueError("Space key must contain only uppercase letters, numbers, and underscores")
 
     return space_key

@@ -11,6 +11,7 @@ from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
 from src.sync.engine import SyncEngine
+from src.ui.widgets.conflict_widget import ConflictSummaryWidget
 
 """Main Textual TUI app for md-to-confluence."""
 
@@ -137,11 +138,25 @@ class MDToConfluenceApp(App):
         width: 1fr;
         margin: 1;
     }
+
+    ConflictSummaryWidget {
+        border: solid $warning;
+        height: auto;
+        width: 1fr;
+        margin: 1;
+        padding: 1;
+    }
+
+    .warning {
+        color: $warning;
+        text-style: bold;
+    }
     """
 
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("ctrl+c", "clear_logs", "Clear Logs"),
+        ("ctrl+s", "scan_conflicts", "Scan Conflicts"),
     ]
 
     file_statuses: reactive[Dict[str, str]] = reactive({})
@@ -153,12 +168,14 @@ class MDToConfluenceApp(App):
         self.state = sync_engine.state
         self.log_widget = LogWidget()
         self.data_table = DataTable()
+        self.conflict_widget = ConflictSummaryWidget()
 
     def compose(self: "MDToConfluenceApp") -> ComposeResult:
         """Compose the app."""
         yield Header(show_clock=True)
         with Container():
             with Vertical():
+                yield self.conflict_widget
                 yield self.data_table
                 yield self.log_widget
         yield Footer()
@@ -167,8 +184,10 @@ class MDToConfluenceApp(App):
         """On mount."""
         self.data_table.add_columns("File", "Status")
         await self.refresh_file_statuses()
+        await self.refresh_conflict_summary()
         self.set_interval(2, self.refresh_file_statuses)
         self.set_interval(0.5, self.log_widget.refresh_logs)
+        self.set_interval(5, self.refresh_conflict_summary)
 
     async def refresh_file_statuses(self: "MDToConfluenceApp") -> None:
         """Refresh the file statuses."""
@@ -185,9 +204,36 @@ class MDToConfluenceApp(App):
             logger = logging.getLogger(__name__)
             logger.error(f"Error refreshing file statuses: {e}")
 
+    async def refresh_conflict_summary(self: "MDToConfluenceApp") -> None:
+        """Refresh the conflict summary."""
+        try:
+            summary = self.sync_engine.get_conflict_summary()
+            self.conflict_widget.update_summary(summary)
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error refreshing conflict summary: {e}")
+
     def action_clear_logs(self: "MDToConfluenceApp") -> None:
         """Clear the log widget."""
         self.log_widget.clear()
+
+    async def action_scan_conflicts(self: "MDToConfluenceApp") -> None:
+        """Scan for conflicts and update the display."""
+        try:
+            conflicts = self.sync_engine.scan_for_conflicts()
+            if conflicts:
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Found {len(conflicts)} potential conflicts")
+                for title, page_id in conflicts.items():
+                    logger.warning(f"Conflict: '{title!r}' -> Page ID: {page_id}")
+            await self.refresh_conflict_summary()
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error scanning for conflicts: {e}")
 
 
 def load_config(path: Path) -> Dict[str, Any]:

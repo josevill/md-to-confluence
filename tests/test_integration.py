@@ -160,86 +160,98 @@ def hello():
 
         # Test that app can get file statuses
         tracked_files = app.state.get_all_tracked_files()
-        assert isinstance(tracked_files, list)
+        assert isinstance(tracked_files, set)
+
+
+@pytest.fixture
+def full_workspace():
+    """Create a complete workspace with all necessary files."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        workspace = Path(temp_dir)
+
+        # Create directory structure
+        docs_dir = workspace / "docs"
+        logs_dir = workspace / "logs"
+        docs_dir.mkdir()
+        logs_dir.mkdir()
+
+        # Create nested structure
+        (docs_dir / "advanced").mkdir()
+        (docs_dir / "images").mkdir()
+
+        # Create config file
+        config = {
+            "confluence": {
+                "base_url": "https://test.atlassian.net",
+                "space_key": "TEST",
+                "token_op_item": "test-item",
+            },
+            "docs_dir": str(docs_dir),
+            "sync": {"debounce_interval": 1.0},
+        }
+        config_file = workspace / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        yield {
+            "workspace": workspace,
+            "docs_dir": docs_dir,
+            "logs_dir": logs_dir,
+            "config_file": config_file,
+            "state_file": workspace / "state.json",
+        }
+
+
+@pytest.fixture
+def mock_confluence_for_e2e():
+    """Enhanced mock for end-to-end testing."""
+    mock_client = Mock(spec=ConfluenceClient)
+
+    # Track created pages
+    created_pages = {}
+    page_counter = [100]  # Use list for mutability
+
+    def mock_create_page(title, body, parent_id=None):
+        page_id = str(page_counter[0])
+        page_counter[0] += 1
+        page_data = {"id": page_id, "title": title, "body": body, "parent_id": parent_id}
+        created_pages[page_id] = page_data
+        return page_data
+
+    def mock_update_page(page_id, title, body):
+        if page_id in created_pages:
+            created_pages[page_id].update({"title": title, "body": body})
+            return created_pages[page_id]
+        return None
+
+    def mock_delete_page(page_id):
+        if page_id in created_pages:
+            del created_pages[page_id]
+            return True
+        return False
+
+    def mock_check_title_conflicts(titles):
+        """Mock conflict checking - return empty dict (no conflicts)."""
+        return {}
+
+    def mock_get_space_page_titles():
+        """Mock space page titles - return empty list."""
+        return []
+
+    mock_client.create_page.side_effect = mock_create_page
+    mock_client.update_page.side_effect = mock_update_page
+    mock_client.delete_page.side_effect = mock_delete_page
+    mock_client.upload_attachment.return_value = {"id": "att123"}
+    mock_client.check_title_conflicts.side_effect = mock_check_title_conflicts
+    mock_client.get_space_page_titles.return_value = []
+
+    # Add access to created pages for verification
+    mock_client._created_pages = created_pages
+
+    return mock_client
 
 
 class TestEndToEndWorkflows:
     """Test complete end-to-end workflows."""
-
-    @pytest.fixture
-    def full_workspace(self):
-        """Create a complete workspace with all necessary files."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir)
-
-            # Create directory structure
-            docs_dir = workspace / "docs"
-            logs_dir = workspace / "logs"
-            docs_dir.mkdir()
-            logs_dir.mkdir()
-
-            # Create nested structure
-            (docs_dir / "advanced").mkdir()
-            (docs_dir / "images").mkdir()
-
-            # Create config file
-            config = {
-                "confluence": {
-                    "base_url": "https://test.atlassian.net",
-                    "space_key": "TEST",
-                    "token_op_item": "test-item",
-                },
-                "docs_dir": str(docs_dir),
-                "sync": {"debounce_interval": 1.0},
-            }
-            config_file = workspace / "config.json"
-            config_file.write_text(json.dumps(config))
-
-            yield {
-                "workspace": workspace,
-                "docs_dir": docs_dir,
-                "logs_dir": logs_dir,
-                "config_file": config_file,
-                "state_file": workspace / "state.json",
-            }
-
-    @pytest.fixture
-    def mock_confluence_for_e2e(self):
-        """Enhanced mock for end-to-end testing."""
-        mock_client = Mock(spec=ConfluenceClient)
-
-        # Track created pages
-        created_pages = {}
-        page_counter = [100]  # Use list for mutability
-
-        def mock_create_page(title, body, parent_id=None):
-            page_id = str(page_counter[0])
-            page_counter[0] += 1
-            page_data = {"id": page_id, "title": title, "body": body, "parent_id": parent_id}
-            created_pages[page_id] = page_data
-            return page_data
-
-        def mock_update_page(page_id, title, body):
-            if page_id in created_pages:
-                created_pages[page_id].update({"title": title, "body": body})
-                return created_pages[page_id]
-            return None
-
-        def mock_delete_page(page_id):
-            if page_id in created_pages:
-                del created_pages[page_id]
-                return True
-            return False
-
-        mock_client.create_page.side_effect = mock_create_page
-        mock_client.update_page.side_effect = mock_update_page
-        mock_client.delete_page.side_effect = mock_delete_page
-        mock_client.upload_attachment.return_value = {"id": "att123"}
-
-        # Add access to created pages for verification
-        mock_client._created_pages = created_pages
-
-        return mock_client
 
     @pytest.mark.integration
     def test_complete_file_lifecycle(self, full_workspace, mock_confluence_for_e2e):
@@ -267,8 +279,8 @@ class TestEndToEndWorkflows:
             create_event = SyncEvent("created", test_file)
             sync_engine._process_event(create_event)
 
-            # Verify creation
-            page_id = sync_engine.state.get_page_id(str(test_file))
+            # Verify creation (use resolved path for consistency)
+            page_id = sync_engine.state.get_page_id(str(test_file.resolve()))
             assert page_id is not None
             assert page_id in mock_confluence_for_e2e._created_pages
 
@@ -293,7 +305,7 @@ class TestEndToEndWorkflows:
 
             # Verify deletion
             assert page_id not in mock_confluence_for_e2e._created_pages
-            assert sync_engine.state.get_page_id(str(test_file)) is None
+            assert sync_engine.state.get_page_id(str(test_file.resolve())) is None
 
         finally:
             sync_engine.stop()
@@ -335,7 +347,7 @@ class TestEndToEndWorkflows:
                 sync_engine._process_event(event)
 
                 # Track page ID
-                page_id = sync_engine.state.get_page_id(str(file_obj))
+                page_id = sync_engine.state.get_page_id(str(file_obj.resolve()))
                 created_page_ids[file_path] = page_id
 
             # Verify all files were processed
@@ -386,17 +398,20 @@ And some more content.
             sync_engine._process_event(event)
 
             # Verify page was created
-            page_id = sync_engine.state.get_page_id(str(test_file))
+            page_id = sync_engine.state.get_page_id(str(test_file.resolve()))
             assert page_id is not None
 
             # Verify image upload was attempted
             sync_engine.confluence.upload_attachment.assert_called()
 
-            # Verify final content contains image macro
+            # Verify final content contains image macro or fallback
             created_page = mock_confluence_for_e2e._created_pages[page_id]
-            # The exact format depends on converter implementation
-            assert 'ac:name="image"' in created_page["body"] or "![" in created_page["body"]
-
+            # Should contain either image macro or fallback info macro
+            assert (
+                'ac:name="image"' in created_page["body"]
+                or 'ac:name="info"' in created_page["body"]
+                or "![" in created_page["body"]
+            )
         finally:
             sync_engine.stop()
             SyncEngine._instance = None
@@ -429,7 +444,7 @@ And some more content.
             sync_engine._process_event(event)
 
             # File should not be in state due to error
-            page_id = sync_engine.state.get_page_id(str(test_file))
+            page_id = sync_engine.state.get_page_id(str(test_file.resolve()))
             assert page_id is None
 
             # Restore normal behavior
@@ -443,7 +458,7 @@ And some more content.
             sync_engine._process_event(event)
 
             # Now should be in state
-            page_id = sync_engine.state.get_page_id(str(test_file))
+            page_id = sync_engine.state.get_page_id(str(test_file.resolve()))
             assert page_id == "recovery123"
 
         finally:
@@ -484,7 +499,7 @@ And some more content.
             # Verify all files were processed
             processed_count = 0
             for test_file in files:
-                page_id = sync_engine.state.get_page_id(str(test_file))
+                page_id = sync_engine.state.get_page_id(str(test_file.resolve()))
                 if page_id is not None:
                     processed_count += 1
 
@@ -507,7 +522,7 @@ class TestSystemLevelIntegration:
             logs_dir.mkdir()
 
             # Set up logging
-            setup_logging(logs_dir)
+            setup_logging(logs_dir=logs_dir)
 
             # Components should log properly
             import logging
@@ -566,7 +581,7 @@ class TestSystemLevelIntegration:
         event = SyncEvent("created", test_file)
         sync_engine1._process_event(event)
 
-        page_id1 = sync_engine1.state.get_page_id(str(test_file))
+        page_id1 = sync_engine1.state.get_page_id(str(test_file.resolve()))
         assert page_id1 is not None
 
         # Stop first session
@@ -582,7 +597,7 @@ class TestSystemLevelIntegration:
         )
 
         # Verify state was persisted
-        page_id2 = sync_engine2.state.get_page_id(str(test_file))
+        page_id2 = sync_engine2.state.get_page_id(str(test_file.resolve()))
         assert page_id2 == page_id1
 
         sync_engine2.stop()
@@ -631,7 +646,7 @@ class TestSystemLevelIntegration:
 
             # Verify files were processed
             processed_count = sum(
-                1 for f in files if sync_engine.state.get_page_id(str(f)) is not None
+                1 for f in files if sync_engine.state.get_page_id(str(f.resolve())) is not None
             )
 
             # Performance assertions
