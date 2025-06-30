@@ -263,11 +263,134 @@ class TestMDToConfluenceApp:
 
     def test_action_clear_logs(self, app):
         """Test clearing logs action."""
+        # Mock the log widget
         app.log_widget.clear = Mock()
 
         app.action_clear_logs()
 
         app.log_widget.clear.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_refresh_conflict_summary_no_conflicts(self, app):
+        """Test refresh conflict summary when no conflicts exist."""
+        # Mock get_conflict_summary to return empty dict
+        app.sync_engine.get_conflict_summary.return_value = {}
+
+        # Mock widget visibility state
+        app.conflict_widget_visible = False
+        app._hide_conflict_widget = AsyncMock()
+        app._show_conflict_widget = AsyncMock()
+
+        await app.refresh_conflict_summary()
+
+        # Should not show widget when no conflicts
+        app._show_conflict_widget.assert_not_called()
+        app._hide_conflict_widget.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_refresh_conflict_summary_with_conflicts_show_widget(self, app):
+        """Test refresh conflict summary when conflicts exist and widget is hidden."""
+        # Mock get_conflict_summary to return conflicts
+        app.sync_engine.get_conflict_summary.return_value = {"title_conflict": 2}
+
+        # Mock widget state - not visible
+        app.conflict_widget_visible = False
+        app._show_conflict_widget = AsyncMock()
+        app.conflict_widget.update_summary = Mock()
+
+        await app.refresh_conflict_summary()
+
+        # Should show widget and update summary
+        app._show_conflict_widget.assert_called_once()
+        app.conflict_widget.update_summary.assert_called_once_with({"title_conflict": 2})
+
+    @pytest.mark.asyncio
+    async def test_refresh_conflict_summary_conflicts_resolved_hide_widget(self, app):
+        """Test refresh conflict summary when conflicts are resolved and widget is visible."""
+        # Mock get_conflict_summary to return no conflicts
+        app.sync_engine.get_conflict_summary.return_value = {}
+
+        # Mock widget state - visible
+        app.conflict_widget_visible = True
+        app._hide_conflict_widget = AsyncMock()
+        app._show_conflict_widget = AsyncMock()
+
+        await app.refresh_conflict_summary()
+
+        # Should hide widget when conflicts are resolved
+        app._hide_conflict_widget.assert_called_once()
+        app._show_conflict_widget.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_refresh_conflict_summary_update_existing_widget(self, app):
+        """Test refresh conflict summary when conflicts exist and widget is already visible."""
+        # Mock get_conflict_summary to return conflicts
+        app.sync_engine.get_conflict_summary.return_value = {"title_conflict": 1}
+
+        # Mock widget state - already visible
+        app.conflict_widget_visible = True
+        app._show_conflict_widget = AsyncMock()
+        app._hide_conflict_widget = AsyncMock()
+        app.conflict_widget.update_summary = Mock()
+
+        await app.refresh_conflict_summary()
+
+        # Should only update the existing widget
+        app._show_conflict_widget.assert_not_called()
+        app._hide_conflict_widget.assert_not_called()
+        app.conflict_widget.update_summary.assert_called_once_with({"title_conflict": 1})
+
+    @pytest.mark.asyncio
+    async def test_show_conflict_widget(self, app):
+        """Test showing the conflict widget."""
+        # Mock the container structure
+        mock_vertical = Mock()
+        mock_vertical.mount = AsyncMock()
+        app.main_container = Mock()
+        app.main_container.children = [mock_vertical]
+
+        app.conflict_widget_visible = False
+
+        await app._show_conflict_widget()
+
+        # Should mount widget and set visibility flag
+        mock_vertical.mount.assert_called_once_with(app.conflict_widget, before=app.data_table)
+        assert app.conflict_widget_visible is True
+
+    @pytest.mark.asyncio
+    async def test_hide_conflict_widget(self, app):
+        """Test hiding the conflict widget."""
+        app.conflict_widget.remove = AsyncMock()
+        app.conflict_widget_visible = True
+
+        await app._hide_conflict_widget()
+
+        # Should remove widget and clear visibility flag
+        app.conflict_widget.remove.assert_called_once()
+        assert app.conflict_widget_visible is False
+
+    @pytest.mark.asyncio
+    async def test_show_conflict_widget_no_container(self, app):
+        """Test showing conflict widget when main container is not set."""
+        app.main_container = None
+        app.conflict_widget_visible = False
+
+        await app._show_conflict_widget()
+
+        # Should not change visibility when container is not available
+        assert app.conflict_widget_visible is False
+
+    @pytest.mark.asyncio
+    async def test_hide_conflict_widget_already_hidden(self, app):
+        """Test hiding conflict widget when it's already hidden."""
+        app.conflict_widget.remove = AsyncMock()
+        app.conflict_widget_visible = False
+
+        await app._hide_conflict_widget()
+
+        # Should not try to remove widget if not visible
+        app.conflict_widget.remove.assert_not_called()
+        assert app.conflict_widget_visible is False
 
     @pytest.mark.asyncio
     async def test_app_with_pilot(self, app):

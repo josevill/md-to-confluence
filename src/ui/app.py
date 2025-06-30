@@ -150,6 +150,10 @@ class MDToConfluenceApp(App):
         color: $warning;
         text-style: bold;
     }
+
+    .hidden {
+        display: none;
+    }
     """
 
     BINDINGS = [
@@ -168,13 +172,15 @@ class MDToConfluenceApp(App):
         self.log_widget = LogWidget()
         self.data_table = DataTable()
         self.conflict_widget = ConflictSummaryWidget()
+        self.main_container = None
+        self.conflict_widget_visible = False
 
     def compose(self: "MDToConfluenceApp") -> ComposeResult:
         """Compose the app."""
         yield Header(show_clock=True)
-        with Container():
+        with Container() as container:
+            self.main_container = container
             with Vertical():
-                yield self.conflict_widget
                 yield self.data_table
                 yield self.log_widget
         yield Footer()
@@ -202,13 +208,45 @@ class MDToConfluenceApp(App):
             logger.error(f"Error refreshing file statuses: {e}")
 
     async def refresh_conflict_summary(self: "MDToConfluenceApp") -> None:
-        """Refresh the conflict summary."""
+        """Refresh the conflict summary and show/hide widget as needed."""
         try:
             summary = self.sync_engine.get_conflict_summary()
-            self.conflict_widget.update_summary(summary)
+
+            # Check if there are any conflicts
+            has_conflicts = summary and any(count > 0 for count in summary.values())
+
+            if has_conflicts and not self.conflict_widget_visible:
+                # Show conflict widget
+                await self._show_conflict_widget()
+                self.conflict_widget.update_summary(summary)
+            elif not has_conflicts and self.conflict_widget_visible:
+                # Hide conflict widget
+                await self._hide_conflict_widget()
+            elif has_conflicts and self.conflict_widget_visible:
+                # Update existing widget
+                self.conflict_widget.update_summary(summary)
+
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.error(f"Error refreshing conflict summary: {e}")
+
+    async def _show_conflict_widget(self: "MDToConfluenceApp") -> None:
+        """Show the conflict widget by adding it to the layout."""
+        if not self.conflict_widget_visible and self.main_container:
+            # Insert conflict widget at the top of the vertical layout
+            vertical_container = self.main_container.children[0]
+            await vertical_container.mount(self.conflict_widget, before=self.data_table)
+            self.conflict_widget_visible = True
+            logger = logging.getLogger(__name__)
+            logger.info("Conflict widget shown due to detected conflicts")
+
+    async def _hide_conflict_widget(self: "MDToConfluenceApp") -> None:
+        """Hide the conflict widget by removing it from the layout."""
+        if self.conflict_widget_visible:
+            await self.conflict_widget.remove()
+            self.conflict_widget_visible = False
+            logger = logging.getLogger(__name__)
+            logger.info("Conflict widget hidden - no conflicts detected")
 
     def action_clear_logs(self: "MDToConfluenceApp") -> None:
         """Clear the log widget."""

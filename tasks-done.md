@@ -198,6 +198,25 @@
   - [x] Add screen management with header/footer
   - [x] Create navigation logic
   - [x] Add real-time log viewing with session filtering
+  - [x] Add file status table
+  - [x] Add keyboard shortcuts (q=quit, ctrl+c=clear logs, ctrl+s=scan conflicts)
+  - [x] Add CSS styling
+  - [x] Add type annotations
+- [x] Fixed conflict widget always visible issue
+  - [x] Removed conflict widget from default layout composition
+  - [x] Implemented dynamic show/hide functionality based on conflict state
+  - [x] Added conflict state detection (shows widget only when conflicts exist)
+  - [x] Created _show_conflict_widget() method to dynamically mount widget
+  - [x] Created _hide_conflict_widget() method to remove widget when not needed
+  - [x] Added proper container management for dynamic widget insertion
+  - [x] Enhanced refresh_conflict_summary() to control widget visibility
+  - [x] Added comprehensive test coverage for all new dynamic behaviors
+    - [x] Tests for no conflicts scenario (widget stays hidden)
+    - [x] Tests for showing widget when conflicts appear
+    - [x] Tests for hiding widget when conflicts resolve
+    - [x] Tests for updating existing visible widget
+    - [x] Tests for edge cases (no container, already hidden/shown)
+  - [x] Conflict widget now only appears during actual conflicts, improving UX
 
 ## Phase 6: CI/CD and Development Infrastructure
 
