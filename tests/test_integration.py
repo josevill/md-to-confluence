@@ -13,7 +13,6 @@ from src.confluence.client import ConfluenceClient
 from src.confluence.converter import MarkdownConverter
 from src.monitor.file_watcher import FileMonitor
 from src.sync.engine import SyncEngine, SyncEvent
-from src.sync.state import SyncState
 from src.ui.app import MDToConfluenceApp
 
 

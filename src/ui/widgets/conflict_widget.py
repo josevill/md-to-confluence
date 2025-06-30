@@ -3,7 +3,7 @@
 import logging
 from typing import Dict, List
 
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.reactive import reactive
 from textual.widgets import Button, DataTable, Label, Static
 

@@ -1,14 +1,13 @@
 import json
 import logging
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Vertical
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Header, RichLog, Static
+from textual.widgets import DataTable, Footer, Header, RichLog
 
 from src.sync.engine import SyncEngine
 from src.ui.widgets.conflict_widget import ConflictSummaryWidget
@@ -199,8 +198,6 @@ class MDToConfluenceApp(App):
                 status = "Synced"
                 self.data_table.add_row(file_path, status)
         except Exception as e:
-            import logging
-
             logger = logging.getLogger(__name__)
             logger.error(f"Error refreshing file statuses: {e}")
 
@@ -210,8 +207,6 @@ class MDToConfluenceApp(App):
             summary = self.sync_engine.get_conflict_summary()
             self.conflict_widget.update_summary(summary)
         except Exception as e:
-            import logging
-
             logger = logging.getLogger(__name__)
             logger.error(f"Error refreshing conflict summary: {e}")
 
@@ -230,8 +225,6 @@ class MDToConfluenceApp(App):
                     logger.warning(f"Conflict: '{title!r}' -> Page ID: {page_id}")
             await self.refresh_conflict_summary()
         except Exception as e:
-            import logging
-
             logger = logging.getLogger(__name__)
             logger.error(f"Error scanning for conflicts: {e}")
 

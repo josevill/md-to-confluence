@@ -10,7 +10,6 @@ from src.confluence.client import ConfluenceClient
 from src.confluence.converter import MarkdownConverter
 from src.sync.conflict_detector import ConflictResolutionStrategy
 from src.sync.engine import SyncEngine, SyncEvent
-from src.sync.state import SyncState
 
 
 class TestSyncEngineConflictDetection:

@@ -1,7 +1,6 @@
 """Tests for conflict widget components."""
 
 from pathlib import Path
-from unittest.mock import Mock, patch
 
 import pytest
 from textual.app import App
