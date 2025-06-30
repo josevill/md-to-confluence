@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
@@ -19,7 +20,7 @@ CONFIG_PATH = Path("config.json")
 
 
 class LogWidget(RichLog):
-    """Widget to display real-time logs with scrolling support."""
+    """Widget to display real-time logs with scrolling support and colors."""
 
     def __init__(self: "LogWidget", max_lines: int = 1000, **kwargs: Any) -> None:
         """Initialize the LogWidget."""
@@ -66,9 +67,47 @@ class LogWidget(RichLog):
         except Exception:
             return True  # If we can't parse the timestamp, include the line
 
+    def _colorize_log_line(self: "LogWidget", log_line: str) -> str:
+        """Add Rich markup colors to log lines based on log level.
+
+        Args:
+            log_line: The raw log line to colorize
+
+        Returns:
+            Log line with Rich markup colors applied
+        """
+        # Pattern to match log format: YYYY-MM-DD HH:MM:SS - name - LEVEL - message
+        log_pattern = r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - ([^-]+) - (\w+) - (.+)$"
+        match = re.match(log_pattern, log_line.strip())
+
+        if not match:
+            return log_line  # Return unchanged if pattern doesn't match
+
+        timestamp, name, level, message = match.groups()
+
+        # Define color schemes for different log levels
+        if level == "WARNING":
+            # Orange/yellow for warnings
+            return f"[bold yellow]{timestamp}[/bold yellow] - [dim]{name.strip()}[/dim] - [bold yellow]{level}[/bold yellow] - [yellow]{message}[/yellow]"
+        elif level == "ERROR":
+            # Red for errors
+            return f"[bold red]{timestamp}[/bold red] - [dim]{name.strip()}[/dim] - [bold red]{level}[/bold red] - [red]{message}[/red]"
+        elif level == "CRITICAL":
+            # Bold red for critical errors
+            return f"[bold red]{timestamp}[/bold red] - [dim]{name.strip()}[/dim] - [bold red]{level}[/bold red] - [bold red]{message}[/bold red]"
+        elif level == "INFO":
+            # Green for info
+            return f"[dim]{timestamp}[/dim] - [dim]{name.strip()}[/dim] - [bold green]{level}[/bold green] - {message}"
+        elif level == "DEBUG":
+            # Blue for debug
+            return f"[dim]{timestamp}[/dim] - [dim]{name.strip()}[/dim] - [bold blue]{level}[/bold blue] - [dim]{message}[/dim]"
+        else:
+            return log_line  # Return unchanged for unknown levels
+
     def add_log(self: "LogWidget", message: str) -> None:
-        """Add a log message to the widget."""
-        self.write(message)
+        """Add a log message to the widget with colors."""
+        colored_message = self._colorize_log_line(message)
+        self.write(colored_message)
 
     async def refresh_logs(self: "LogWidget") -> None:
         """Read new lines from the log file for the current session."""
@@ -91,10 +130,11 @@ class LogWidget(RichLog):
                     f.seek(self.last_file_size)
                     lines = f.readlines()
 
-                # Filter and add current session lines
+                # Filter and add current session lines with colors
                 for line in lines:
                     if self._is_current_session(line.rstrip()):
-                        self.write(line.rstrip())
+                        colored_line = self._colorize_log_line(line.rstrip())
+                        self.write(colored_line)
 
                 self.last_file_size = current_size
 
@@ -109,10 +149,11 @@ class LogWidget(RichLog):
             try:
                 with log_file.open("r", encoding="utf-8") as f:
                     lines = f.readlines()
-                    # Load current session lines
+                    # Load current session lines with colors
                     for line in lines:
                         if self._is_current_session(line.rstrip()):
-                            self.write(line.rstrip())
+                            colored_line = self._colorize_log_line(line.rstrip())
+                            self.write(colored_line)
 
                     self.last_file_size = log_file.stat().st_size
             except Exception as e:

@@ -198,6 +198,13 @@
   - [x] Add screen management with header/footer
   - [x] Create navigation logic
   - [x] Add real-time log viewing with session filtering
+- [x] __NEW__: Implement colored logging system
+  - [x] Added ANSI color codes for console output (warnings in yellow, errors in red)
+  - [x] Enhanced LogWidget with Rich markup for Textual UI colors
+  - [x] Implemented ColoredFormatter class for terminal output
+  - [x] Added log level parsing for UI color application
+  - [x] Maintained clean log files (no color codes in file storage)
+  - [x] Support for both console and UI colored output simultaneously
   - [x] Add file status table
   - [x] Add keyboard shortcuts (q=quit, ctrl+c=clear logs, ctrl+s=scan conflicts)
   - [x] Add CSS styling

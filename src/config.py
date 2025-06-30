@@ -6,6 +6,7 @@ import logging.handlers
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -19,6 +20,61 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10MB
 LOG_BACKUP_COUNT = 5
+
+
+# ANSI color codes for console logging
+class LogColors:
+    """ANSI color codes for colored console logging."""
+
+    RESET = "\033[0m"
+    RED = "\033[91m"  # Critical/Error
+    YELLOW = "\033[93m"  # Warning
+    GREEN = "\033[92m"  # Info
+    BLUE = "\033[94m"  # Debug
+    BOLD = "\033[1m"
+
+    @classmethod
+    def colorize(cls, text: str, color: str) -> str:
+        """Wrap text with color codes."""
+        return f"{color}{text}{cls.RESET}"
+
+
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter that adds colors to console output based on log level."""
+
+    def __init__(self, fmt: str = None, datefmt: str = None):
+        """Initialize the colored formatter."""
+        super().__init__(fmt, datefmt)
+
+        # Color mapping for different log levels
+        self.level_colors = {
+            logging.DEBUG: LogColors.BLUE,
+            logging.INFO: LogColors.GREEN,
+            logging.WARNING: LogColors.YELLOW,
+            logging.ERROR: LogColors.RED,
+            logging.CRITICAL: LogColors.RED + LogColors.BOLD,
+        }
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Format the log record with appropriate colors."""
+        # Get the original formatted message
+        formatted = super().format(record)
+
+        # Only add colors if we're outputting to a terminal
+        if hasattr(sys.stderr, "isatty") and sys.stderr.isatty():
+            color = self.level_colors.get(record.levelno, LogColors.RESET)
+
+            # Color the entire line for warnings and critical/errors
+            if record.levelno >= logging.WARNING:
+                formatted = LogColors.colorize(formatted, color)
+            else:
+                # For INFO and DEBUG, just color the level name
+                level_name = record.levelname
+                colored_level = LogColors.colorize(level_name, color)
+                formatted = formatted.replace(level_name, colored_level, 1)
+
+        return formatted
+
 
 # Configuration validation
 REQUIRED_CONFIG_KEYS = {
@@ -44,23 +100,32 @@ def setup_logging(level: int = logging.INFO, logs_dir: Optional[Path] = None) ->
     target_logs_dir.mkdir(exist_ok=True)
     log_file = target_logs_dir / "md_to_confluence.log"
 
+    # File handler (unchanged - no colors in log files)
     file_handler = logging.handlers.RotatingFileHandler(
         log_file,
         mode="a",  # Append mode
         maxBytes=LOG_MAX_BYTES,
         backupCount=LOG_BACKUP_COUNT,
     )
+    file_formatter = logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT)
+    file_handler.setFormatter(file_formatter)
 
-    formatter = logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT)
-    file_handler.setFormatter(formatter)
+    # Console handler with colors
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_formatter = ColoredFormatter(LOG_FORMAT, LOG_DATE_FORMAT)
+    console_handler.setFormatter(console_formatter)
 
+    # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
+    # Remove existing handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
+    # Add both handlers
     root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
 
     session_start = datetime.now().strftime(LOG_DATE_FORMAT)
     logging.info("=" * 80)
