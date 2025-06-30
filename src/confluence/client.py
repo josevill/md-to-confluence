@@ -490,7 +490,7 @@ class ConfluenceClient:
             if title and page_id:
                 title_to_id[title] = page_id
 
-        logger.info(f"Found {len(title_to_id)} pages in space '{self.space_key!r}'")
+        logger.info(f"Found {len(title_to_id)} pages in space {self.space_key!r}")
         return title_to_id
 
     def check_title_conflicts(self: "ConfluenceClient", titles: list[str]) -> Dict[str, str]:
@@ -511,7 +511,7 @@ class ConfluenceClient:
             if title in existing_titles:
                 conflicts[title] = existing_titles[title]
                 logger.warning(
-                    f"Title conflict detected: '{title!r}' already exists (ID: {existing_titles[title]})"
+                    f"Title conflict detected: {title!r} already exists (ID: {existing_titles[title]})"
                 )
 
         if conflicts:
