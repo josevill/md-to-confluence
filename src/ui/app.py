@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical
 from textual.reactive import reactive
@@ -107,7 +108,13 @@ class LogWidget(RichLog):
     def add_log(self: "LogWidget", message: str) -> None:
         """Add a log message to the widget with colors."""
         colored_message = self._colorize_log_line(message)
-        self.write(colored_message)
+        try:
+            # Convert Rich markup to Text object for proper rendering
+            rich_text = Text.from_markup(colored_message)
+            self.write(rich_text)
+        except Exception:
+            # Fallback to plain text if markup parsing fails
+            self.write(message)
 
     async def refresh_logs(self: "LogWidget") -> None:
         """Read new lines from the log file for the current session."""
@@ -134,7 +141,13 @@ class LogWidget(RichLog):
                 for line in lines:
                     if self._is_current_session(line.rstrip()):
                         colored_line = self._colorize_log_line(line.rstrip())
-                        self.write(colored_line)
+                        try:
+                            # Convert Rich markup to Text object for proper rendering
+                            rich_text = Text.from_markup(colored_line)
+                            self.write(rich_text)
+                        except Exception:
+                            # Fallback to plain text if markup parsing fails
+                            self.write(line.rstrip())
 
                 self.last_file_size = current_size
 
@@ -153,7 +166,13 @@ class LogWidget(RichLog):
                     for line in lines:
                         if self._is_current_session(line.rstrip()):
                             colored_line = self._colorize_log_line(line.rstrip())
-                            self.write(colored_line)
+                            try:
+                                # Convert Rich markup to Text object for proper rendering
+                                rich_text = Text.from_markup(colored_line)
+                                self.write(rich_text)
+                            except Exception:
+                                # Fallback to plain text if markup parsing fails
+                                self.write(line.rstrip())
 
                     self.last_file_size = log_file.stat().st_size
             except Exception as e:

@@ -205,6 +205,11 @@
   - [x] Added log level parsing for UI color application
   - [x] Maintained clean log files (no color codes in file storage)
   - [x] Support for both console and UI colored output simultaneously
+  - [x] __FIXED__: Rich markup rendering in Textual UI using Text.from_markup()
+    - [x] Fixed issue where Rich markup appeared as literal text instead of colors
+    - [x] Added proper Text object conversion for RichLog widget compatibility
+    - [x] Added error handling and fallback to plain text if markup parsing fails
+    - [x] Updated tests to work with Rich Text object integration
   - [x] Add file status table
   - [x] Add keyboard shortcuts (q=quit, ctrl+c=clear logs, ctrl+s=scan conflicts)
   - [x] Add CSS styling

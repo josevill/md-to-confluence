@@ -25,12 +25,15 @@ class TestLogWidget:
 
     def test_add_log_message(self):
         """Test adding log messages to widget."""
+        from unittest.mock import patch
+
         widget = LogWidget()
 
-        widget.add_log("Test log message")
-
-        # Check that message was added (write method called)
-        # Note: Can't easily verify content without rendering
+        # Mock the write method to check it's called
+        with patch.object(widget, "write") as mock_write:
+            widget.add_log("Test log message")
+            # Check that write was called
+            mock_write.assert_called_once()
 
     def test_colorize_log_line_warning(self):
         """Test colorizing WARNING log lines with Rich markup."""
